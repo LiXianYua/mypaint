@@ -15,4 +15,6 @@ pub mod surface;
 pub mod symmetry;
 pub mod util;
 
-// Re-exports added once types are defined
+// Re-exports
+pub use brush::Brush;
+pub use surface::Surface;
