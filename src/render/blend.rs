@@ -28,17 +28,15 @@ fn luma_u16(r: u16, g: u16, b: u16) -> i32 {
 
 /// 遍历 RLE mask，对每个非零像素执行回调 `f(rgba_4channel_pixel, coverage)`。
 ///
-/// callback 收到的 `&mut [Premul15; 4]` 是 [`Premul15`] 的 layout-identical
-/// 视图（通过 `#[repr(transparent)]` 在 unsafe 内部 cast），强制 blend
-/// 代码用 `.raw()` 解包并通过 [`Premul15::from_scaled_u32`] 写回，避免
-/// 把 mask coverage / RLE skip / pixel channel 混用。
+/// callback 收到的 `&mut [Premul15; 4]` 是 tile 切片的 4-channel 窗口。
+/// type-system 阻止把 mask coverage / RLE skip 混用为 pixel channel。
 ///
 /// RLE 解码由 [`RleEntry::parse`] 在单一入口完成，杜绝把 skip 槽当
 /// coverage 读取（或反之）。
 #[inline]
 fn iter_rle_mask<F: FnMut(&mut [Premul15; 4], Coverage15)>(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     mut f: F,
 ) {
     let mut mi: usize = 0;
@@ -51,17 +49,7 @@ fn iter_rle_mask<F: FnMut(&mut [Premul15; 4], Coverage15)>(
                 if ri + 4 > rgba.len() {
                     return;
                 }
-                // SAFETY:
-                // - `Premul15` is `#[repr(transparent)]` over `u16` and has
-                //   no niches (it accepts any `u16` bit pattern as a value),
-                //   so the layout, alignment, and bit-pattern validity of
-                //   `[u16; 4]` and `[Premul15; 4]` are identical.
-                // - We hold exclusive access via `&mut rgba`. The view
-                //   `&mut [Premul15; 4]` borrows only `rgba[ri..ri+4]`; the
-                //   loop does not re-index `rgba` while `px` is live, and
-                //   `ri += 4` advances the cursor before the next cast.
-                let px: &mut [Premul15; 4] =
-                    unsafe { &mut *(rgba[ri..ri + 4].as_mut_ptr() as *mut [Premul15; 4]) };
+                let px: &mut [Premul15; 4] = (&mut rgba[ri..ri + 4]).try_into().unwrap();
                 f(px, cov);
                 ri += 4;
             }
@@ -80,7 +68,7 @@ fn iter_rle_mask<F: FnMut(&mut [Premul15; 4], Coverage15)>(
 /// 对应 draw_dab_pixels_BlendMode_Normal。
 pub fn blend_dab_normal(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     color_r: Premul15,
     color_g: Premul15,
     color_b: Premul15,
@@ -103,7 +91,7 @@ pub fn blend_dab_normal(
 /// 对应 draw_dab_pixels_BlendMode_LockAlpha。
 pub fn blend_dab_lock_alpha(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     color_r: Premul15,
     color_g: Premul15,
     color_b: Premul15,
@@ -126,7 +114,7 @@ pub fn blend_dab_lock_alpha(
 /// 对应 draw_dab_pixels_BlendMode_Normal_and_Eraser。
 pub fn blend_dab_normal_eraser(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     color_r: Premul15,
     color_g: Premul15,
     color_b: Premul15,
@@ -187,7 +175,7 @@ fn set_rgb16_lum_from_rgb16(
 /// 对应 draw_dab_pixels_BlendMode_Color。
 pub fn blend_dab_color(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     color_r: Premul15,
     color_g: Premul15,
     color_b: Premul15,
@@ -227,7 +215,7 @@ pub fn blend_dab_color(
 /// 对应 draw_dab_pixels_BlendMode_Posterize。`opacity` 已包含 opaque/mask 调制。
 pub fn blend_dab_posterize(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     opacity: Coverage15,
     posterize_num: u16,
 ) {
@@ -268,7 +256,7 @@ fn spectral_blend_factor(x: f32) -> f32 {
 #[allow(clippy::too_many_arguments)]
 pub fn blend_dab_normal_eraser_paint(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     color_r: Premul15,
     color_g: Premul15,
     color_b: Premul15,
@@ -332,7 +320,7 @@ pub fn blend_dab_normal_eraser_paint(
 /// 对应 draw_dab_pixels_BlendMode_Normal_Paint（color_a = SCALE 退化版）。
 pub fn blend_dab_normal_paint(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     color_r: Premul15,
     color_g: Premul15,
     color_b: Premul15,
@@ -354,7 +342,7 @@ pub fn blend_dab_normal_paint(
 /// 对应 draw_dab_pixels_BlendMode_LockAlpha_Paint。
 pub fn blend_dab_lock_alpha_paint(
     mask: &[u16],
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     color_r: Premul15,
     color_g: Premul15,
     color_b: Premul15,
@@ -415,7 +403,7 @@ mod tests {
     #[test]
     fn rle_mask_iterates_single_value() {
         let mask = single_pixel_mask(SCALE as u16);
-        let mut rgba = vec![0u16; 4];
+        let mut rgba = vec![Premul15::ZERO; 4];
         let mut count = 0;
         iter_rle_mask(&mask, &mut rgba, |_, _| count += 1);
         assert_eq!(count, 1);
@@ -425,7 +413,7 @@ mod tests {
     fn rle_mask_with_skip() {
         // 第一个值，跳过 2 像素（=8 步长），再一个值，终止
         let mask = vec![SCALE as u16, 0, 8, SCALE as u16, 0, 0];
-        let mut rgba = vec![0u16; 16]; // 4 pixels
+        let mut rgba = vec![Premul15::ZERO; 16]; // 4 pixels
         let mut indices = Vec::new();
         let mut ptr = 0;
         iter_rle_mask(&mask, &mut rgba, |px, _| {
@@ -440,7 +428,7 @@ mod tests {
     fn normal_blend_full_opacity_writes_color() {
         // 单像素，full mask + opacity
         let mask = vec![SCALE as u16, 0, 0];
-        let mut rgba = vec![0u16; 4];
+        let mut rgba = vec![Premul15::ZERO; 4];
         blend_dab_normal(
             &mask,
             &mut rgba,
@@ -449,8 +437,8 @@ mod tests {
             Premul15::ZERO,
             Coverage15::FULL,
         );
-        assert_eq!(rgba[0], SCALE as u16);
-        assert_eq!(rgba[3], SCALE as u16);
+        assert_eq!(rgba[0].raw(), SCALE as u16);
+        assert_eq!(rgba[3].raw(), SCALE as u16);
     }
 
     #[test]

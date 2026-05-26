@@ -63,7 +63,11 @@ impl TileRequest {
 pub trait TileBackend {
     /// 请求 tile 缓冲区。返回的 slice 长度应为 TILE_BUFFER_LEN。
     /// 越界 tile 应返回一个 null/scratch tile（写入会被丢弃）。
-    fn tile_request_start<'a>(&'a mut self, req: &TileRequest) -> &'a mut [u16];
+    ///
+    /// Slice element 类型是 [`Premul15`]（premultiplied 15-bit RGBA channel）—
+    /// 强制 implementor 用 Premul15 存储，type-system 阻止把 OOR 值
+    /// （比如 C 上游 `memset(buffer, 255)` 的 0xFFFF）注入。
+    fn tile_request_start<'a>(&'a mut self, req: &TileRequest) -> &'a mut [Premul15];
 
     /// 提交（可选）。对于持有 raw buffer 的后端通常是 noop。
     fn tile_request_end(&mut self, req: &TileRequest) {
@@ -77,7 +81,7 @@ pub trait TileBackend {
 
     /// 取一个 readonly tile 的快照（用于 get_color）。
     /// 返回 None 表示该 tile 不存在/越界（视为透明）。
-    fn tile_snapshot(&mut self, tx: i32, ty: i32) -> Option<Vec<u16>>;
+    fn tile_snapshot(&mut self, tx: i32, ty: i32) -> Option<Vec<Premul15>>;
 }
 
 /// Tile-based surface（真正按 tile 渲染，对应 MyPaintTiledSurface）。
@@ -165,7 +169,7 @@ impl TiledSurface {
 /// 对单个 tile 应用一个 dab op，先渲染 mask，再按 blend mode 逐通道混合。
 /// 对应 mypaint-tiled-surface.c:process_op。
 pub(crate) fn process_op(
-    rgba: &mut [u16],
+    rgba: &mut [Premul15],
     mask_buf: &mut MaskBuffer,
     tx: i32,
     ty: i32,
@@ -469,7 +473,7 @@ impl Surface for TiledSurface {
 /// - `paint >= 0`: 同时维护 avg_spectral 和 avg_rgb，最后由调用方合并。
 fn accumulate_tile_color_rle(
     mask: &[u16],
-    tile: &[u16],
+    tile: &[Premul15],
     paint: f32,
     sum_weight: &mut f32,
     sum_r: &mut f32,
@@ -530,7 +534,7 @@ fn accumulate_tile_color_rle(
 #[inline]
 fn iter_rle_mask_get_color<F: FnMut(Coverage15, &[Premul15; 4])>(
     mask: &[u16],
-    tile: &[u16],
+    tile: &[Premul15],
     mut f: F,
 ) {
     let mut mi: usize = 0;
@@ -543,15 +547,7 @@ fn iter_rle_mask_get_color<F: FnMut(Coverage15, &[Premul15; 4])>(
                 if ri + 4 > tile.len() {
                     return;
                 }
-                // SAFETY:
-                // - `Premul15` is `#[repr(transparent)]` over `u16` with no
-                //   niches, so layout/alignment/validity equivalent to
-                //   `[u16; 4]`.
-                // - Shared (`&[Premul15; 4]`) borrow only; the underlying
-                //   `tile: &[u16]` is held shared by `iter_rle_mask_get_color`,
-                //   so no aliasing conflict.
-                let px: &[Premul15; 4] =
-                    unsafe { &*(tile[ri..ri + 4].as_ptr() as *const [Premul15; 4]) };
+                let px: &[Premul15; 4] = (&tile[ri..ri + 4]).try_into().unwrap();
                 f(cov, px);
                 ri += 4;
             }

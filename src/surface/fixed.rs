@@ -24,11 +24,9 @@ pub struct FixedTileBackend {
 pub struct TileSlot {
     pub tx: i32,
     pub ty: i32,
-    /// raw ptr 指向 tile 的 u16 buffer（长度 TILE_BUFFER_LEN）。
-    /// 不同 TileSlot 的指针保证互不重叠。内部存储是 [`Premul15`]，
-    /// 通过 `#[repr(transparent)]` 重新解释为 `*mut u16`，供 process_op
-    /// 等接受 `&mut [u16]` 的 API 使用。
-    pub buffer: *mut u16,
+    /// raw ptr 指向 tile 的 [`Premul15`] buffer（长度 TILE_BUFFER_LEN）。
+    /// 不同 TileSlot 的指针保证互不重叠。
+    pub buffer: *mut Premul15,
 }
 
 // SAFETY: 调用者保证 tx/ty 不重复 → 不同 TileSlot 指向 disjoint memory，
@@ -93,9 +91,7 @@ impl FixedTileBackend {
             },
             "parallel_tile_slots requires unique (tx, ty) — duplicates would alias"
         );
-        // 用 *mut u16 暴露给 process_op；Premul15 的 #[repr(transparent)]
-        // 保证 layout 等价。
-        let base_ptr = self.tile_buffer.as_mut_ptr() as *mut u16;
+        let base_ptr = self.tile_buffer.as_mut_ptr();
         tiles
             .iter()
             .filter_map(|&(tx, ty)| {
@@ -111,15 +107,13 @@ impl FixedTileBackend {
 }
 
 impl TileBackend for FixedTileBackend {
-    fn tile_request_start<'a>(&'a mut self, req: &TileRequest) -> &'a mut [u16] {
-        // backend 内部用 Vec<Premul15>，trait 仍按 [u16] 接口暴露给 caller
-        // （process_op / blend 等接受 &mut [u16] 然后内部 cast 回 Premul15
-        // slice）。这里用 safe 方向的 slice cast (Premul15 ⊆ u16)。
-        let slice = match self.tile_offset(req.tx, req.ty) {
+    fn tile_request_start<'a>(&'a mut self, req: &TileRequest) -> &'a mut [Premul15] {
+        // Vec<Premul15> 存储 + Premul15 slice 直出 — type-safe，
+        // 无需 unsafe slice cast。
+        match self.tile_offset(req.tx, req.ty) {
             Some(off) => &mut self.tile_buffer[off..off + TILE_BUFFER_LEN],
             None => &mut self.null_tile[..],
-        };
-        Premul15::slice_as_u16_mut(slice)
+        }
     }
 
     fn tile_request_end(&mut self, req: &TileRequest) {
@@ -129,10 +123,9 @@ impl TileBackend for FixedTileBackend {
         }
     }
 
-    fn tile_snapshot(&mut self, tx: i32, ty: i32) -> Option<Vec<u16>> {
+    fn tile_snapshot(&mut self, tx: i32, ty: i32) -> Option<Vec<Premul15>> {
         let off = self.tile_offset(tx, ty)?;
-        // 返回 raw u16 Vec 给外部消费者（FFI / 检查点工具）。
-        Some(Premul15::slice_as_u16(&self.tile_buffer[off..off + TILE_BUFFER_LEN]).to_vec())
+        Some(self.tile_buffer[off..off + TILE_BUFFER_LEN].to_vec())
     }
 
     fn save_png(&mut self, path: &Path, x: i32, y: i32, width: i32, height: i32) {
@@ -255,8 +248,12 @@ impl FixedTiledSurface {
             .zip(slots.into_par_iter())
             .for_each(|((tile_idx, ops), slot)| {
                 // SAFETY: 每个 slot 的 buffer 指针对应一个唯一 tile，
-                // par_iter 保证当前线程独占该 slot
-                let buf: &mut [u16] =
+                // par_iter 保证当前线程独占该 slot。TileSlot.buffer 是
+                // *mut u16 但 provenance 来自 Vec<Premul15>（repr-transparent
+                // layout 等价），所以 cast 到 *mut Premul15 是 sound 的。
+                // SAFETY: 每个 slot 的 buffer 指针对应一个唯一 tile，
+                // par_iter 保证当前线程独占该 slot。
+                let buf: &mut [Premul15] =
                     unsafe { std::slice::from_raw_parts_mut(slot.buffer, TILE_BUFFER_LEN) };
                 let mut mask_buf = crate::render::mask::MaskBuffer::new();
                 for op in &ops {

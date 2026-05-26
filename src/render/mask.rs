@@ -218,26 +218,16 @@ impl Premul15 {
         }
     }
 
-    /// 把 `&mut [Premul15]` 重新解释为 `&mut [u16]`（layout-identical cast）。
-    ///
-    /// **逻辑 invariant 警告**：layout cast 本身不引发 UB（任何 u16 位模式
-    /// 都是合法 `Premul15` 字面位），但通过返回的 `&mut [u16]` 写入 > SCALE
-    /// 的值会违反 `Premul15` 的逻辑不变量（0..=SCALE）。仅供 crate 内部
-    /// 把 `Vec<Premul15>` 透出 `[u16]` 接口给 trait / FFI 用，调用方负责
-    /// 不写入 OOR 值（blend 路径通过 [`Self::from_scaled_u32`] 饱和保证）。
-    #[inline]
-    pub(crate) fn slice_as_u16_mut(s: &mut [Self]) -> &mut [u16] {
-        // SAFETY: Premul15 is #[repr(transparent)] over u16 with no niches.
-        // Layout, alignment, and bit-pattern validity of [Premul15] and
-        // [u16] are identical, so reinterpreting the slice is sound. The
-        // resulting [u16] inherits the borrow semantics of the input.
-        unsafe { std::slice::from_raw_parts_mut(s.as_mut_ptr() as *mut u16, s.len()) }
-    }
-
     /// 把 `&[Premul15]` 重新解释为 `&[u16]`（只读方向无 invariant 风险）。
+    ///
+    /// 主要给非 RGBA-blend 场景的下游（如以 raw u16 形式 dump tile 内容
+    /// 做调试输出）用。trait `tile_request_start` / `tile_snapshot` 已经
+    /// 直接暴露 `[Premul15]`，多数 caller 不再需要这个 cast。
     #[inline]
     pub fn slice_as_u16(s: &[Self]) -> &[u16] {
-        // SAFETY: same as `slice_as_u16_mut` — layout/align/validity equiv.
+        // SAFETY: Premul15 is #[repr(transparent)] over u16 with no niches.
+        // Layout, alignment, and bit-pattern validity of [Premul15] and
+        // [u16] are identical.
         unsafe { std::slice::from_raw_parts(s.as_ptr() as *const u16, s.len()) }
     }
 }
