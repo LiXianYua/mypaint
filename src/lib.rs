@@ -3,8 +3,6 @@
 //! This crate provides a brush engine for making brushstrokes,
 //! ported from the C library libmypaint (https://github.com/mypaint/libmypaint).
 
-#![allow(unused)]
-
 include!(concat!(env!("OUT_DIR"), "/generated_settings.rs"));
 
 pub mod brush;

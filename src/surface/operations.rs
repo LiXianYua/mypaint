@@ -2,7 +2,6 @@
 //! Corresponds to operationqueue.c, tilemap.c, fifo.c.
 
 use std::collections::HashMap;
-use crate::util::rect::Rect;
 
 /// A tile operation (render dab, get color, etc.)
 pub struct TileOp {

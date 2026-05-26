@@ -15,7 +15,7 @@ const LUMA_BLUE: f32 = 0.0722;
 #[inline]
 fn luma_u16(r: u16, g: u16, b: u16) -> i32 {
     // returns scaled luma (already divided by 1<<15 in the C macro context)
-    ((r as f32 * LUMA_RED + g as f32 * LUMA_GREEN + b as f32 * LUMA_BLUE) as i32)
+    (r as f32 * LUMA_RED + g as f32 * LUMA_GREEN + b as f32 * LUMA_BLUE) as i32
 }
 
 /// 标准 Normal 模式 (premultiplied alpha over)。

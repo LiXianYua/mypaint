@@ -16,8 +16,7 @@ use crate::render::DabParams;
 use crate::BrushSetting;
 use crate::BrushInput;
 use crate::NUM_INPUTS;
-use crate::SETTING_INFO;
-use crate::util::helpers::{mod_arith, smallest_angular_difference, rand_gauss, max3, min3, WGM_EPSILON};
+use crate::util::helpers::{mod_arith, smallest_angular_difference, rand_gauss, WGM_EPSILON};
 use crate::smudge::mix_colors;
 use crate::render::color::*;
 
@@ -464,7 +463,7 @@ impl Brush {
         let radius_by_random = self.settings_value[BrushSetting::RadiusByRandom as usize];
         if radius_by_random != 0.0 {
             let noise = rand_gauss(&mut self.rng) * radius_by_random;
-            let mut radius_log = self.settings_value[BrushSetting::RadiusLogarithmic as usize] + noise;
+            let radius_log = self.settings_value[BrushSetting::RadiusLogarithmic as usize] + noise;
             radius = radius_log.exp().clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
             let alpha_correction = (self.state.actual_radius / radius).powi(2);
             if alpha_correction <= 1.0 {
@@ -480,7 +479,7 @@ impl Brush {
         let mut color_h = baseval(self, BrushSetting::ColorH);
         let mut color_s = baseval(self, BrushSetting::ColorS);
         let mut color_v = baseval(self, BrushSetting::ColorV);
-        hsv_to_rgb_float(&mut color_h, &mut color_s, &mut color_v);
+        hsv_to_rgb(&mut color_h, &mut color_s, &mut color_v);
 
         // update smudge color
         let smudge_length = self.settings_value[BrushSetting::SmudgeLength as usize];
@@ -516,7 +515,7 @@ impl Brush {
         // eraser
         let eraser = self.settings_value[BrushSetting::Eraser as usize];
         if eraser != 0.0 {
-            eraser_target_alpha *= (1.0 - eraser);
+            eraser_target_alpha *= 1.0 - eraser;
         }
 
         // HSV/HSL color dynamics
@@ -538,20 +537,20 @@ impl Brush {
 
         // HSV color change
         if using_hsv_dynamics {
-            rgb_to_hsv_float(&mut color_h, &mut color_s, &mut color_v);
+            rgb_to_hsv(&mut color_h, &mut color_s, &mut color_v);
             color_h += self.settings_value[BrushSetting::ChangeColorH as usize];
             color_s += color_s * color_v * self.settings_value[BrushSetting::ChangeColorHsvS as usize];
             color_v += self.settings_value[BrushSetting::ChangeColorV as usize];
-            hsv_to_rgb_float(&mut color_h, &mut color_s, &mut color_v);
+            hsv_to_rgb(&mut color_h, &mut color_s, &mut color_v);
         }
 
         // HSL color change
         if using_hsl_dynamics {
-            rgb_to_hsl_float(&mut color_h, &mut color_s, &mut color_v);
+            rgb_to_hsl(&mut color_h, &mut color_s, &mut color_v);
             color_v += self.settings_value[BrushSetting::ChangeColorL as usize];
             color_s += color_s * (1.0 - color_v).abs().min(color_v.abs()) * 2.0
                 * self.settings_value[BrushSetting::ChangeColorHslS as usize];
-            hsl_to_rgb_float(&mut color_h, &mut color_s, &mut color_v);
+            hsl_to_rgb(&mut color_h, &mut color_s, &mut color_v);
         }
 
         // linearize
@@ -569,8 +568,8 @@ impl Brush {
         let min_fadeout_in_pixels = self.settings_value[BrushSetting::AntiAliasing as usize];
         if current_fadeout_in_pixels < min_fadeout_in_pixels {
             let current_optical_radius = radius - (1.0 - hardness) * radius / 2.0;
-            let hardness_new = ((current_optical_radius - (min_fadeout_in_pixels / 2.0))
-                / (current_optical_radius + (min_fadeout_in_pixels / 2.0)));
+            let hardness_new = (current_optical_radius - (min_fadeout_in_pixels / 2.0))
+                / (current_optical_radius + (min_fadeout_in_pixels / 2.0));
             let radius_new = min_fadeout_in_pixels / (1.0 - hardness_new);
             hardness = hardness_new;
             radius = radius_new;
@@ -680,7 +679,7 @@ impl Brush {
             assert!(tilt_declinationy.is_finite());
         }
 
-        let mut pressure = if pressure <= 0.0 { 0.0 } else { pressure };
+        let pressure = if pressure <= 0.0 { 0.0 } else { pressure };
         if !x.is_finite() || !y.is_finite()
             || x > 1e10 || y > 1e10 || x < -1e10 || y < -1e10
         {
@@ -990,74 +989,3 @@ fn apply_smudge_fn(
     eraser_target_alpha
 }
 
-// =========================================================================
-// Color conversion helpers (in-place, matching C versions exactly)
-// =========================================================================
-
-/// HSV → RGB (in-place). Exact copy of helpers.c:150.
-fn hsv_to_rgb_float(h: &mut f32, s: &mut f32, v: &mut f32) {
-    *h = *h - h.floor();
-    *s = s.clamp(0.0, 1.0);
-    *v = v.clamp(0.0, 1.0);
-    if *s == 0.0 { *h = *v; *s = *v; *v = *v; return; }
-    let mut hue = *h;
-    if hue == 1.0 { hue = 0.0; }
-    hue *= 6.0;
-    let i = hue as i32;
-    let f = hue - i as f32;
-    let w = *v * (1.0 - *s);
-    let q = *v * (1.0 - (*s * f));
-    let t = *v * (1.0 - (*s * (1.0 - f)));
-    let (r, g, b) = match i {
-        0 => (*v, t, w), 1 => (q, *v, w), 2 => (w, *v, t),
-        3 => (w, q, *v), 4 => (t, w, *v), _ => (*v, w, q),
-    };
-    *h = r; *s = g; *v = b;
-}
-
-/// RGB → HSV (in-place). Exact copy of helpers.c:93.
-fn rgb_to_hsv_float(r: &mut f32, g: &mut f32, b: &mut f32) {
-    *r = r.clamp(0.0, 1.0); *g = g.clamp(0.0, 1.0); *b = b.clamp(0.0, 1.0);
-    let max = max3(*r, *g, *b); let min = min3(*r, *g, *b);
-    let delta = max - min;
-    if delta > 0.0001 {
-        let s = delta / max;
-        let h = if *r == max { let mut h = (*g - *b) / delta; if h < 0.0 { h += 6.0; } h }
-        else if *g == max { 2.0 + (*b - *r) / delta }
-        else { 4.0 + (*r - *g) / delta };
-        *r = h / 6.0; *g = s; *b = max;
-    } else { *r = 0.0; *g = 0.0; *b = max; }
-}
-
-/// RGB → HSL (in-place). Exact copy of helpers.c:230.
-fn rgb_to_hsl_float(r: &mut f32, g: &mut f32, b: &mut f32) {
-    *r = r.clamp(0.0, 1.0); *g = g.clamp(0.0, 1.0); *b = b.clamp(0.0, 1.0);
-    let max = max3(*r, *g, *b); let min = min3(*r, *g, *b);
-    let l = (max + min) / 2.0;
-    if max == min { *r = 0.0; *g = 0.0; *b = l; return; }
-    let s = if l <= 0.5 { (max - min) / (max + min) } else { (max - min) / (2.0 - max - min) };
-    let delta = if max - min == 0.0 { 1.0 } else { max - min };
-    let h = if *r == max { (*g - *b) / delta }
-    else if *g == max { 2.0 + (*b - *r) / delta }
-    else { 4.0 + (*r - *g) / delta };
-    let mut h = h / 6.0; if h < 0.0 { h += 1.0; }
-    *r = h; *g = s; *b = l;
-}
-
-fn hsl_value(n1: f32, n2: f32, mut hue: f32) -> f32 {
-    if hue > 6.0 { hue -= 6.0; } else if hue < 0.0 { hue += 6.0; }
-    if hue < 1.0 { n1 + (n2 - n1) * hue } else if hue < 3.0 { n2 }
-    else if hue < 4.0 { n1 + (n2 - n1) * (4.0 - hue) } else { n1 }
-}
-
-/// HSL → RGB (in-place). Exact copy of helpers.c:328.
-fn hsl_to_rgb_float(h: &mut f32, s: &mut f32, l: &mut f32) {
-    *h = *h - h.floor(); *s = s.clamp(0.0, 1.0); *l = l.clamp(0.0, 1.0);
-    if *s == 0.0 { *h = *l; *s = *l; *l = *l; return; }
-    let m2 = if *l <= 0.5 { *l * (1.0 + *s) } else { *l + *s - *l * *s };
-    let m1 = 2.0 * *l - m2;
-    let r = hsl_value(m1, m2, *h * 6.0 + 2.0);
-    let g = hsl_value(m1, m2, *h * 6.0);
-    let b = hsl_value(m1, m2, *h * 6.0 - 2.0);
-    *h = r; *s = g; *l = b;
-}

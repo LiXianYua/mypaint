@@ -1,4 +1,3 @@
-use crate::NUM_INPUTS;
 
 /// A mapping from inputs to output values via piecewise-linear control points.
 /// Corresponds to MyPaintMapping in mypaint-mapping.c.

@@ -126,6 +126,12 @@ impl Brush {
         self.stroke_total_painting_time = 0.0;
     }
 
+    /// Total accumulated painting time since the last `new_stroke()`.
+    /// 对应 `mypaint_brush_get_total_stroke_painting_time`。
+    pub fn total_stroke_painting_time(&self) -> f64 {
+        self.stroke_total_painting_time
+    }
+
     pub fn set_base_value(&mut self, id: BrushSetting, value: f32) {
         self.settings[id as usize].set_base_value(value);
         self.settings_base_values_have_changed();

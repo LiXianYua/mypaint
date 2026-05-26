@@ -7,6 +7,7 @@
 use libc::{c_int, c_char};
 use std::ffi::CStr;
 use std::os::raw::c_void;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::Brush;
 use crate::BrushSetting;
 use crate::BrushInput;
@@ -16,52 +17,64 @@ use crate::render::DabParams;
 use crate::util::rect::Rectangles;
 
 // ============================================================================
-// MyPaintBrush opaque handle
+// MyPaintBrush opaque handle with refcounting
 // ============================================================================
 
+/// FFI wrapper that adds C-style refcounting on top of `Brush`.
+/// C 调用者通过 `mypaint_brush_ref`/`unref` 管理生命周期，必须配对。
 #[repr(C)]
 pub struct MyPaintBrush {
-    _private: [u8; 0],
+    refcount: AtomicUsize,
+    inner: Brush,
 }
 
 #[inline]
-unsafe fn brush_ref<'a>(p: *mut MyPaintBrush) -> &'a mut Brush {
-    &mut *(p as *mut Brush)
+unsafe fn handle<'a>(p: *mut MyPaintBrush) -> &'a mut Brush {
+    &mut (*p).inner
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_new() -> *mut MyPaintBrush {
-    let brush = Box::new(Brush::new());
-    Box::into_raw(brush) as *mut MyPaintBrush
+    let b = Box::new(MyPaintBrush {
+        refcount: AtomicUsize::new(1),
+        inner: Brush::new(),
+    });
+    Box::into_raw(b)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_new_with_buckets(num_smudge_buckets: c_int) -> *mut MyPaintBrush {
-    let brush = Box::new(Brush::new_with_buckets(num_smudge_buckets.max(0) as usize));
-    Box::into_raw(brush) as *mut MyPaintBrush
+    let b = Box::new(MyPaintBrush {
+        refcount: AtomicUsize::new(1),
+        inner: Brush::new_with_buckets(num_smudge_buckets.max(0) as usize),
+    });
+    Box::into_raw(b)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_brush_ref(self_: *mut MyPaintBrush) {
+    if self_.is_null() { return; }
+    (*self_).refcount.fetch_add(1, Ordering::AcqRel);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_unref(self_: *mut MyPaintBrush) {
-    if !self_.is_null() {
-        drop(Box::from_raw(self_ as *mut Brush));
+    if self_.is_null() { return; }
+    let old = (*self_).refcount.fetch_sub(1, Ordering::AcqRel);
+    if old == 1 {
+        // 最后一个引用 — drop
+        drop(Box::from_raw(self_));
     }
-}
-
-/// Refcount is a no-op in Rust port — ownership is via Box.
-#[no_mangle]
-pub unsafe extern "C" fn mypaint_brush_ref(_self_: *mut MyPaintBrush) {
-    // No-op: Rust uses Box ownership instead of refcounting.
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_reset(self_: *mut MyPaintBrush) {
-    brush_ref(self_).reset();
+    handle(self_).reset();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_new_stroke(self_: *mut MyPaintBrush) {
-    brush_ref(self_).new_stroke();
+    handle(self_).new_stroke();
 }
 
 #[no_mangle]
@@ -72,7 +85,7 @@ pub unsafe extern "C" fn mypaint_brush_set_base_value(
         return;
     }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    brush_ref(self_).set_base_value(setting, value);
+    handle(self_).set_base_value(setting, value);
 }
 
 #[no_mangle]
@@ -83,7 +96,7 @@ pub unsafe extern "C" fn mypaint_brush_get_base_value(
         return 0.0;
     }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    brush_ref(self_).get_base_value(setting)
+    handle(self_).get_base_value(setting)
 }
 
 #[no_mangle]
@@ -94,7 +107,7 @@ pub unsafe extern "C" fn mypaint_brush_is_constant(
         return 0;
     }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    if brush_ref(self_).is_constant(setting) { 1 } else { 0 }
+    if handle(self_).is_constant(setting) { 1 } else { 0 }
 }
 
 #[no_mangle]
@@ -105,7 +118,7 @@ pub unsafe extern "C" fn mypaint_brush_get_inputs_used_n(
         return 0;
     }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    brush_ref(self_).inputs_used_n(setting) as c_int
+    handle(self_).inputs_used_n(setting) as c_int
 }
 
 #[no_mangle]
@@ -115,7 +128,7 @@ pub unsafe extern "C" fn mypaint_brush_set_mapping_n(
     if id < 0 || id as usize >= crate::NUM_SETTINGS { return; }
     if input < 0 || input as usize >= crate::NUM_INPUTS { return; }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    brush_ref(self_).set_mapping_n(setting, input as usize, n.max(0) as usize);
+    handle(self_).set_mapping_n(setting, input as usize, n.max(0) as usize);
 }
 
 #[no_mangle]
@@ -125,7 +138,7 @@ pub unsafe extern "C" fn mypaint_brush_get_mapping_n(
     if id < 0 || id as usize >= crate::NUM_SETTINGS { return 0; }
     if input < 0 || input as usize >= crate::NUM_INPUTS { return 0; }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    brush_ref(self_).get_mapping_n(setting, input as usize) as c_int
+    handle(self_).get_mapping_n(setting, input as usize) as c_int
 }
 
 #[no_mangle]
@@ -135,7 +148,7 @@ pub unsafe extern "C" fn mypaint_brush_set_mapping_point(
     if id < 0 || id as usize >= crate::NUM_SETTINGS { return; }
     if input < 0 || input as usize >= crate::NUM_INPUTS { return; }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    brush_ref(self_).set_mapping_point(setting, input as usize, index.max(0) as usize, x, y);
+    handle(self_).set_mapping_point(setting, input as usize, index.max(0) as usize, x, y);
 }
 
 #[no_mangle]
@@ -146,7 +159,7 @@ pub unsafe extern "C" fn mypaint_brush_get_mapping_point(
     if id < 0 || id as usize >= crate::NUM_SETTINGS { return; }
     if input < 0 || input as usize >= crate::NUM_INPUTS { return; }
     let setting: BrushSetting = std::mem::transmute(id as usize);
-    let (x, y) = brush_ref(self_).get_mapping_point(setting, input as usize, index.max(0) as usize);
+    let (x, y) = handle(self_).get_mapping_point(setting, input as usize, index.max(0) as usize);
     if !out_x.is_null() { *out_x = x; }
     if !out_y.is_null() { *out_y = y; }
 }
@@ -157,7 +170,7 @@ pub unsafe extern "C" fn mypaint_brush_get_state(
 ) -> f32 {
     if i < 0 || i as usize >= crate::NUM_STATES { return 0.0; }
     let state: BrushStateEnum = std::mem::transmute(i as usize);
-    brush_ref(self_).get_state(state)
+    handle(self_).get_state(state)
 }
 
 #[no_mangle]
@@ -166,12 +179,12 @@ pub unsafe extern "C" fn mypaint_brush_set_state(
 ) {
     if i < 0 || i as usize >= crate::NUM_STATES { return; }
     let state: BrushStateEnum = std::mem::transmute(i as usize);
-    brush_ref(self_).set_state(state, value);
+    handle(self_).set_state(state, value);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_from_defaults(self_: *mut MyPaintBrush) {
-    brush_ref(self_).from_defaults();
+    handle(self_).from_defaults();
 }
 
 #[no_mangle]
@@ -183,7 +196,7 @@ pub unsafe extern "C" fn mypaint_brush_from_string(
         Ok(s) => s,
         Err(_) => return 0,
     };
-    if brush_ref(self_).from_string(s) { 1 } else { 0 }
+    if handle(self_).from_string(s) { 1 } else { 0 }
 }
 
 // ============================================================================
@@ -284,7 +297,7 @@ pub unsafe extern "C" fn mypaint_brush_stroke_to(
     barrel_rotation: f32, linear: c_int,
 ) -> c_int {
     let mut adapter = CSurfaceAdapter { c_surface: surface };
-    let result = brush_ref(self_).stroke_to(
+    let result = handle(self_).stroke_to(
         &mut adapter, x, y, pressure, xtilt, ytilt,
         dtime, viewzoom, viewrotation, barrel_rotation, linear != 0);
     if result { 1 } else { 0 }
@@ -292,17 +305,22 @@ pub unsafe extern "C" fn mypaint_brush_stroke_to(
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_get_total_stroke_painting_time(
-    _self_: *mut MyPaintBrush,
+    self_: *mut MyPaintBrush,
 ) -> f64 {
-    // Not exposed via public API yet; return 0
-    0.0
+    handle(self_).total_stroke_painting_time()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_set_print_inputs(
     _self_: *mut MyPaintBrush, _enabled: c_int,
 ) {
-    // No-op: diagnostic only
+    // No-op: diagnostic only. Original print_inputs prints to stderr; we skip.
+}
+
+/// Empty stub matching the C `mypaint_init()` symbol (which is empty in upstream too).
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_init() {
+    // No-op
 }
 
 // ============================================================================
@@ -311,26 +329,26 @@ pub unsafe extern "C" fn mypaint_brush_set_print_inputs(
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_setting_from_cname(name: *const c_char) -> c_int {
-    if name.is_null() { return crate::NUM_SETTINGS as c_int; }
+    if name.is_null() { return -1_i32 as c_int; }
     let s = match CStr::from_ptr(name).to_str() {
         Ok(s) => s,
-        Err(_) => return crate::NUM_SETTINGS as c_int,
+        Err(_) => return -1_i32 as c_int,
     };
     match BrushSetting::from_cname(s) {
         Some(setting) => setting as c_int,
-        None => crate::NUM_SETTINGS as c_int,
+        None => -1_i32 as c_int,
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_input_from_cname(name: *const c_char) -> c_int {
-    if name.is_null() { return crate::NUM_INPUTS as c_int; }
+    if name.is_null() { return -1_i32 as c_int; }
     let s = match CStr::from_ptr(name).to_str() {
         Ok(s) => s,
-        Err(_) => return crate::NUM_INPUTS as c_int,
+        Err(_) => return -1_i32 as c_int,
     };
     match BrushInput::from_cname(s) {
         Some(input) => input as c_int,
-        None => crate::NUM_INPUTS as c_int,
+        None => -1_i32 as c_int,
     }
 }

@@ -57,7 +57,7 @@ pub fn rgb_to_hsv(r: &mut f32, g: &mut f32, b: &mut f32) {
         } else {
             4.0 + (*r - *g) / delta
         };
-        *r = (h / 6.0);
+        *r = h / 6.0;
         *g = s;
         *b = max;
     } else {
