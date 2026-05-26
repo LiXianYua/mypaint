@@ -9,9 +9,10 @@
 //!
 //! 像素格式: u16 RGBA premultiplied alpha, 范围 0..=2^15 (32768)。
 
+use crate::render::mask::{Coverage15, RleSkip};
 use crate::smudge::{rgb_to_spectral, spectral_to_rgb};
 
-const SCALE: u32 = 1 << 15;
+const SCALE: u32 = Coverage15::SCALE;
 
 // LUMA coefficients matching brushmodes.c:180-182
 const LUMA_RED: f32 = 0.2126;
@@ -23,20 +24,21 @@ fn luma_u16(r: u16, g: u16, b: u16) -> i32 {
     (r as f32 * LUMA_RED + g as f32 * LUMA_GREEN + b as f32 * LUMA_BLUE) as i32
 }
 
-/// 遍历 RLE mask，对每个非零像素执行回调 `f(rgba_offset, mask_val)`。
+/// 遍历 RLE mask，对每个非零像素执行回调 `f(rgba_4channel_slice, coverage)`。
+/// callback 收到的 [`Coverage15`] 是 type-system 强制的 — 防止把 RLE skip
+/// length 误用为 coverage。
 #[inline]
-fn iter_rle_mask<F: FnMut(&mut [u16], u16)>(mask: &[u16], rgba: &mut [u16], mut f: F) {
+fn iter_rle_mask<F: FnMut(&mut [u16], Coverage15)>(mask: &[u16], rgba: &mut [u16], mut f: F) {
     let mut mi: usize = 0;
     let mut ri: usize = 0;
     loop {
         // 处理连续非零段
         while mi < mask.len() && mask[mi] != 0 {
-            let m = mask[mi];
+            let cov = Coverage15::from_raw(mask[mi]);
             if ri + 4 > rgba.len() {
                 return;
             }
-            // SAFETY-equivalent: rgba slice 长度足够
-            f(&mut rgba[ri..ri + 4], m);
+            f(&mut rgba[ri..ri + 4], cov);
             mi += 1;
             ri += 4;
         }
@@ -44,7 +46,8 @@ fn iter_rle_mask<F: FnMut(&mut [u16], u16)>(mask: &[u16], rgba: &mut [u16], mut 
         if mi + 1 >= mask.len() || mask[mi + 1] == 0 {
             return; // 终止符
         }
-        ri += mask[mi + 1] as usize;
+        let skip = RleSkip::from_raw(mask[mi + 1]);
+        ri += skip.as_usize();
         mi += 2;
     }
 }
@@ -63,7 +66,7 @@ pub fn blend_dab_normal(
     opacity: u16,
 ) {
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a = (m as u32 * opacity as u32) / SCALE;
+        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
         let opa_b = SCALE - opa_a;
         px[3] = (opa_a + opa_b * px[3] as u32 / SCALE) as u16;
         px[0] = ((opa_a * color_r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
@@ -82,7 +85,7 @@ pub fn blend_dab_lock_alpha(
     opacity: u16,
 ) {
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a_top = (m as u32 * opacity as u32) / SCALE;
+        let opa_a_top = (m.raw() as u32 * opacity as u32) / SCALE;
         let opa_b = SCALE - opa_a_top;
         let opa_a = opa_a_top * px[3] as u32 / SCALE;
         px[0] = ((opa_a * color_r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
@@ -102,7 +105,7 @@ pub fn blend_dab_normal_eraser(
     opacity: u16,
 ) {
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a_raw = (m as u32 * opacity as u32) / SCALE;
+        let opa_a_raw = (m.raw() as u32 * opacity as u32) / SCALE;
         let opa_b = SCALE - opa_a_raw;
         let opa_a = opa_a_raw * color_a as u32 / SCALE;
         px[3] = (opa_a + opa_b * px[3] as u32 / SCALE) as u16;
@@ -168,7 +171,7 @@ pub fn blend_dab_color(
         r = ((r as u32 * a as u32) / SCALE) as u16;
         g = ((g as u32 * a as u32) / SCALE) as u16;
         b = ((b as u32 * a as u32) / SCALE) as u16;
-        let opa_a = (m as u32 * opacity as u32) / SCALE;
+        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
         let opa_b = SCALE - opa_a;
         px[0] = ((opa_a * r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
         px[1] = ((opa_a * g as u32 + opa_b * px[1] as u32) / SCALE) as u16;
@@ -189,7 +192,7 @@ pub fn blend_dab_posterize(mask: &[u16], rgba: &mut [u16], opacity: u16, posteri
         let post_r = (SCALE as f32 * (r * pn).round() / pn) as u32;
         let post_g = (SCALE as f32 * (g * pn).round() / pn) as u32;
         let post_b = (SCALE as f32 * (b * pn).round() / pn) as u32;
-        let opa_a = (m as u32 * opacity as u32) / SCALE;
+        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
         let opa_b = SCALE - opa_a;
         px[0] = ((opa_a * post_r + opa_b * px[0] as u32) / SCALE) as u16;
         px[1] = ((opa_a * post_g + opa_b * px[1] as u32) / SCALE) as u16;
@@ -223,7 +226,7 @@ pub fn blend_dab_normal_eraser_paint(
 ) {
     let opacity = opacity.max(150);
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a = (m as u32 * opacity as u32) / SCALE;
+        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
         let opa_b = SCALE - opa_a;
         let opa_a2 = opa_a * color_a as u32 / SCALE;
         let opa_out = opa_a2 + opa_b * px[3] as u32 / SCALE;
@@ -302,7 +305,7 @@ pub fn blend_dab_lock_alpha_paint(
 ) {
     let opacity = opacity.max(150);
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a_raw = (m as u32 * opacity as u32) / SCALE;
+        let opa_a_raw = (m.raw() as u32 * opacity as u32) / SCALE;
         let opa_b = SCALE - opa_a_raw;
         let opa_a = opa_a_raw * px[3] as u32 / SCALE;
         if px[3] == 0 {

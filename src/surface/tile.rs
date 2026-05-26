@@ -16,7 +16,7 @@ use crate::render::blend::{
     blend_dab_normal_eraser, blend_dab_normal_eraser_paint, blend_dab_normal_paint,
     blend_dab_posterize,
 };
-use crate::render::mask::{render_dab_mask, MaskBuffer};
+use crate::render::mask::{render_dab_mask, Coverage15, MaskBuffer, RleSkip};
 use crate::smudge::rgb_to_spectral;
 use crate::symmetry::SymmetryData;
 use crate::util::rect::{Rect, Rectangles};
@@ -492,8 +492,8 @@ fn accumulate_tile_color_rle(
         // Legacy: 纯加权累加 premultiplied RGBA
         // 对应 brushmodes.c:get_color_pixels_legacy (L491-532)
         iter_rle_mask_get_color(mask, tile, |m, px| {
-            let opa = m as u32;
-            *sum_weight += m as f32 / SCALE as f32;
+            let opa = m.raw() as u32;
+            *sum_weight += m.raw() as f32 / SCALE as f32;
             *sum_r += (opa * px[0] as u32 / SCALE) as f32;
             *sum_g += (opa * px[1] as u32 / SCALE) as f32;
             *sum_b += (opa * px[2] as u32 / SCALE) as f32;
@@ -504,9 +504,9 @@ fn accumulate_tile_color_rle(
 
     // paint >= 0: 加性 RGB + 可选光谱混合
     iter_rle_mask_get_color(mask, tile, |m, px| {
-        let a = m as f32 * px[3] as f32 / ((1u32 << 30) as f32);
+        let a = m.raw() as f32 * px[3] as f32 / ((1u32 << 30) as f32);
         let alpha_sums = a + *sum_a;
-        *sum_weight += m as f32 / SCALE as f32;
+        *sum_weight += m.raw() as f32 / SCALE as f32;
         let (fac_a, fac_b) = if alpha_sums > 0.0 {
             let fa = a / alpha_sums;
             (fa, 1.0 - fa)
@@ -532,9 +532,10 @@ fn accumulate_tile_color_rle(
     });
 }
 
-/// 遍历 RLE mask 同步访问 tile RGBA。
+/// 遍历 RLE mask 同步访问 tile RGBA。callback 收到 [`Coverage15`]，
+/// 杜绝把 RLE skip 当 coverage 误用。
 #[inline]
-fn iter_rle_mask_get_color<F: FnMut(u16, &[u16; 4])>(mask: &[u16], tile: &[u16], mut f: F) {
+fn iter_rle_mask_get_color<F: FnMut(Coverage15, &[u16; 4])>(mask: &[u16], tile: &[u16], mut f: F) {
     let mut mi: usize = 0;
     let mut ri: usize = 0;
     loop {
@@ -543,14 +544,15 @@ fn iter_rle_mask_get_color<F: FnMut(u16, &[u16; 4])>(mask: &[u16], tile: &[u16],
                 return;
             }
             let px: &[u16; 4] = (&tile[ri..ri + 4]).try_into().unwrap();
-            f(mask[mi], px);
+            f(Coverage15::from_raw(mask[mi]), px);
             mi += 1;
             ri += 4;
         }
         if mi + 1 >= mask.len() || mask[mi + 1] == 0 {
             return;
         }
-        ri += mask[mi + 1] as usize;
+        let skip = RleSkip::from_raw(mask[mi + 1]);
+        ri += skip.as_usize();
         mi += 2;
     }
 }

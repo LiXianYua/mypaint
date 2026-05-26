@@ -2,8 +2,8 @@
 //! 对应 mypaint-tiled-surface.c:render_dab_mask。
 //!
 //! 一个 tile (64×64) 的 mask buffer 用 run-length encoding：
-//! - 连续非零值：每个值是该像素的 opacity (0..32768)
-//! - 0 后跟一个跳过计数：表示 N 个像素直接跳过
+//! - 连续非零值：每个值是该像素的 opacity ([`Coverage15`], 0..=32768)
+//! - 0 后跟一个跳过计数（[`RleSkip`]，已乘 *4 步长）：跳过 N 个像素
 //! - 末尾 0,0 表示结束
 //!
 //! Blend 函数遍历这个 buffer 来高效跳过透明区域。
@@ -11,7 +11,104 @@
 use crate::render::dab::{calculate_opa, calculate_rr, calculate_rr_antialiased, MaskParams};
 use crate::surface::tile::TILE_SIZE;
 
-const SCALE: u32 = 1 << 15;
+// ============================================================================
+// Mask newtypes — 区分 RLE 编码里的两种 u16 字段（coverage 和 skip）
+// ============================================================================
+
+/// 0..=`SCALE` (1<<15 = 32768) 的 mask alpha-coverage（不透明度）值。
+///
+/// 用 newtype 是为了在 type 层面区分两种 u16：
+/// - **coverage**（本类型）— 像素的 mask 不透明度
+/// - **skip length**（[`RleSkip`]）— RLE 跳过段的 *4 偏移
+///
+/// 两者在 RLE buffer 里都是 u16，但语义完全不同。若混用（例如把
+/// skip length 当 coverage 传给 blend），会产生静默的图像 corruption。
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Coverage15(u16);
+
+impl Coverage15 {
+    /// 满 coverage 值（1<<15）。
+    pub const SCALE: u32 = 1 << 15;
+
+    /// 完全透明（=0）。
+    pub const ZERO: Self = Self(0);
+
+    /// 完全不透明（=SCALE）。
+    pub const FULL: Self = Self(Self::SCALE as u16);
+
+    /// 从 u16 构造，超过 SCALE 时饱和到 [`FULL`](Self::FULL)。
+    #[inline]
+    pub const fn new_saturating(v: u16) -> Self {
+        if (v as u32) > Self::SCALE {
+            Self::FULL
+        } else {
+            Self(v)
+        }
+    }
+
+    /// 从 raw u16 构造（不做范围检查）。仅供从 [`MaskBuffer`] 这样
+    /// 已知合法的 buffer 中读取时使用。
+    #[inline]
+    pub const fn from_raw(v: u16) -> Self {
+        Self(v)
+    }
+
+    /// 取出内部 u16，用于 blend 算法的 u32 / u16 整数运算。
+    #[inline]
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// RLE 编码里的 skip 段长度，**已经包含 `*4` 的 RGBA 步长**。
+///
+/// 例如 `RleSkip::from_pixel_count(7).raw() == 28` —— 表示跳过 7 个像素
+/// 等于在 RGBA tile slice 里前进 28 个 u16。
+///
+/// 与 [`Coverage15`] 不可互换（这是 newtype 的核心目的）。
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct RleSkip(u16);
+
+impl RleSkip {
+    /// 从像素数构造（内部乘 4 并饱和到 u16::MAX）。
+    #[inline]
+    pub const fn from_pixel_count(px: usize) -> Self {
+        let n = px.saturating_mul(4);
+        if n > u16::MAX as usize {
+            Self(u16::MAX)
+        } else {
+            Self(n as u16)
+        }
+    }
+
+    /// 从已经 `*4` 过的 raw u16 构造（不做检查）。仅供从 [`MaskBuffer`]
+    /// 这样已知合法的 buffer 中读取时使用。
+    #[inline]
+    pub const fn from_raw(v: u16) -> Self {
+        Self(v)
+    }
+
+    /// 取出内部 u16（已 *4）。
+    #[inline]
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+
+    /// 用作 rgba slice 偏移（同 raw）。
+    #[inline]
+    pub const fn as_usize(self) -> usize {
+        self.0 as usize
+    }
+}
+
+const SCALE: u32 = Coverage15::SCALE;
 
 /// Mask buffer for one tile. 最长情况：每个像素一个值 + tile 边界跳过。
 /// 上游为 `TILE_SIZE*TILE_SIZE + 2*TILE_SIZE` u16。
@@ -122,19 +219,19 @@ pub fn render_dab_mask(
                 )
             };
             let opa = calculate_opa(rr, &mask_params);
-            let opa_u = (opa * SCALE as f32) as u16;
-            if opa_u == 0 {
+            let cov = Coverage15::new_saturating((opa * SCALE as f32) as u16);
+            if cov.is_zero() {
                 skip += 1;
             } else {
                 if skip > 0 {
-                    // 写入 0, skip*4 (C 的 mask 索引步长是 4 因为是 rgba)
+                    // 写入 0, RleSkip (RGBA 步长 *4 由 from_pixel_count 处理)
                     mask_buf.buf[write_idx] = 0;
                     write_idx += 1;
-                    mask_buf.buf[write_idx] = (skip * 4).min(u16::MAX as usize) as u16;
+                    mask_buf.buf[write_idx] = RleSkip::from_pixel_count(skip).raw();
                     write_idx += 1;
                     skip = 0;
                 }
-                mask_buf.buf[write_idx] = opa_u;
+                mask_buf.buf[write_idx] = cov.raw();
                 write_idx += 1;
             }
             xp += 1;
@@ -153,6 +250,49 @@ pub fn render_dab_mask(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ------------------------------------------------------------------------
+    // newtype tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn coverage15_new_saturating_caps_at_scale() {
+        assert_eq!(Coverage15::new_saturating(0).raw(), 0);
+        assert_eq!(Coverage15::new_saturating(1).raw(), 1);
+        assert_eq!(
+            Coverage15::new_saturating(Coverage15::SCALE as u16).raw(),
+            Coverage15::SCALE as u16
+        );
+        assert_eq!(
+            Coverage15::new_saturating(u16::MAX).raw(),
+            Coverage15::SCALE as u16
+        );
+    }
+
+    #[test]
+    fn coverage15_constants() {
+        assert!(Coverage15::ZERO.is_zero());
+        assert!(!Coverage15::FULL.is_zero());
+        assert_eq!(Coverage15::FULL.raw() as u32, Coverage15::SCALE);
+    }
+
+    #[test]
+    fn rle_skip_from_pixel_count_multiplies_by_4() {
+        assert_eq!(RleSkip::from_pixel_count(0).raw(), 0);
+        assert_eq!(RleSkip::from_pixel_count(7).raw(), 28);
+        assert_eq!(RleSkip::from_pixel_count(7).as_usize(), 28);
+    }
+
+    #[test]
+    fn rle_skip_saturates_at_u16_max() {
+        // 16384 * 4 = 65536 > u16::MAX, should saturate.
+        assert_eq!(RleSkip::from_pixel_count(16384).raw(), u16::MAX);
+        assert_eq!(RleSkip::from_pixel_count(usize::MAX).raw(), u16::MAX);
+    }
+
+    // ------------------------------------------------------------------------
+    // mask render tests
+    // ------------------------------------------------------------------------
 
     #[test]
     fn empty_mask_when_radius_outside_tile() {
