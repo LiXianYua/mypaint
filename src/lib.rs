@@ -15,6 +15,9 @@ pub mod surface;
 pub mod symmetry;
 pub mod util;
 
+#[cfg(feature = "ffi")]
+pub mod ffi;
+
 // Re-exports
 pub use brush::Brush;
 pub use surface::Surface;
