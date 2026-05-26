@@ -3,8 +3,11 @@
 
 use crate::surface::Surface;
 use crate::render::DabParams;
-use crate::render::dab::{calculate_rr, dab_mask_value_scaled};
-use crate::render::blend::{blend_pixel_normal, blend_pixel_eraser, blend_pixel_lock_alpha, blend_pixel_colorize, blend_pixel_posterize};
+use crate::render::dab::{calculate_rr, calculate_opa, MaskParams};
+use crate::render::blend::{
+    blend_pixel_normal, blend_pixel_normal_eraser,
+    blend_pixel_lock_alpha, blend_pixel_color, blend_pixel_posterize,
+};
 use crate::util::rect::{Rect, Rectangles};
 use crate::symmetry::SymmetryData;
 use std::path::Path;
@@ -72,26 +75,40 @@ impl TiledSurface {
     }
 
     /// Render a single dab at a given position with symmetry transforms.
+    /// 对应 mypaint-tiled-surface.c:render_dab_mask + process_op 的合并版本。
     fn render_dab_at(&mut self, params: &DabParams) {
         let radius = params.radius;
-        let iradius = (radius as i32).max(1) + 1;
-        let cx = params.x.round() as i32;
-        let cy = params.y.round() as i32;
+        if radius < 0.1 || params.hardness == 0.0 {
+            return;
+        }
+
+        // Pre-compute mask falloff parameters
+        let mask_params = MaskParams::from_hardness_softness(params.hardness, params.softness);
+        let aspect_ratio = params.aspect_ratio.max(1.0);
+        let angle_rad = params.angle.to_radians();
+        let cs = angle_rad.cos();
+        let sn = angle_rad.sin();
+        let one_over_radius2 = 1.0 / (radius * radius);
+
+        let opacity = (params.opaque.clamp(0.0, 1.0) * SCALE as f32) as u16;
+        let color_r = (params.color_r.clamp(0.0, 1.0) * SCALE as f32) as u16;
+        let color_g = (params.color_g.clamp(0.0, 1.0) * SCALE as f32) as u16;
+        let color_b = (params.color_b.clamp(0.0, 1.0) * SCALE as f32) as u16;
+        let color_a = (params.alpha_eraser.clamp(0.0, 1.0) * SCALE as f32) as u16;
 
         let num_points = self.symmetry_data.num_symmetry_points();
 
         for sym_idx in 0..num_points {
             let (sx, sy) = self.symmetry_data.transform_point(sym_idx, params.x, params.y);
-            let scx = sx.round() as i32;
-            let scy = sy.round() as i32;
 
-            // Compute bounding box for this dab
-            let x0 = (scx - iradius).max(0) as usize;
-            let y0 = (scy - iradius).max(0) as usize;
-            let x1 = (scx + iradius).min(self.width as i32 - 1) as usize;
-            let y1 = (scy + iradius).min(self.height as i32 - 1) as usize;
+            // Bounding box (放宽 1 像素，与 C 的 r_fringe = radius+1 对应)
+            let r_fringe = radius + 1.0;
+            let x0 = ((sx - r_fringe).floor() as i32).max(0) as usize;
+            let y0 = ((sy - r_fringe).floor() as i32).max(0) as usize;
+            let x1 = ((sx + r_fringe).floor() as i32).min(self.width as i32 - 1).max(0) as usize;
+            let y1 = ((sy + r_fringe).floor() as i32).min(self.height as i32 - 1).max(0) as usize;
 
-            if x0 >= x1 || y0 >= y1 { continue; }
+            if x0 > x1 || y0 > y1 { continue; }
 
             // Expand atomic bbox
             if let Some(ref mut bbox) = self.current_bbox {
@@ -99,70 +116,41 @@ impl TiledSurface {
                 bbox.expand_to_include_point(x1 as i32, y1 as i32);
             }
 
-            let mask_hardness = params.hardness;
-            let mask_softness = params.softness;
-            let opacity = (params.opaque * SCALE as f32) as u16;
-
-            let color_r = (params.color_r * SCALE as f32) as u16;
-            let color_g = (params.color_g * SCALE as f32) as u16;
-            let color_b = (params.color_b * SCALE as f32) as u16;
-
-            let aspect_ratio = params.aspect_ratio;
-            let angle = params.angle;
-
             for py in y0..=y1 {
                 for px in x0..=x1 {
-                    let dx = (px as i32 - scx) as f32;
-                    let dy = (py as i32 - scy) as f32;
-                    let rr = calculate_rr(dx, dy, aspect_ratio, angle);
-
-                    if rr > radius * radius { continue; }
-
-                    let mask_val = dab_mask_value_scaled(rr, radius, mask_hardness, mask_softness);
+                    let rr = calculate_rr(
+                        px as i32, py as i32, sx, sy,
+                        aspect_ratio, sn, cs, one_over_radius2);
+                    let opa = calculate_opa(rr, &mask_params);
+                    let mask_val = (opa * SCALE as f32) as u16;
                     if mask_val == 0 { continue; }
 
                     let idx = self.pixel_index(px, py);
-                    let pixel = &mut self.pixel_buffer[idx..idx + 4];
+                    let pixel: &mut [u16; 4] = (&mut self.pixel_buffer[idx..idx + 4])
+                        .try_into().unwrap();
 
-                    // Apply blend mode based on params
+                    // Posterize is applied first (independent of blend mode)
                     if params.posterize > 0.0 {
                         blend_pixel_posterize(
-                            pixel.try_into().unwrap(),
-                            mask_val,
-                            (params.posterize * SCALE as f32) as u16,
-                            (params.posterize_num * SCALE as f32) as u16,
+                            pixel, mask_val,
+                            (params.posterize.clamp(0.0, 1.0) * SCALE as f32) as u16,
+                            (params.posterize_num.clamp(0.0, 1.28) * SCALE as f32) as u16,
                         );
                     }
 
-                    if params.lock_alpha > 0.5 {
-                        blend_pixel_lock_alpha(
-                            pixel.try_into().unwrap(),
-                            mask_val,
-                            color_r, color_g, color_b,
-                            opacity,
-                        );
-                    } else if params.colorize > 0.5 {
-                        blend_pixel_colorize(
-                            pixel.try_into().unwrap(),
-                            mask_val,
-                            color_r, color_g, color_b,
-                            opacity,
-                        );
-                    } else if params.alpha_eraser < 1.0 {
-                        blend_pixel_eraser(
-                            pixel.try_into().unwrap(),
-                            mask_val,
-                            color_r, color_g, color_b,
-                            (params.alpha_eraser * SCALE as f32) as u16,
-                            opacity,
-                        );
+                    // Choose blend mode: priority lock_alpha > colorize > eraser > normal
+                    if params.lock_alpha >= 1.0 {
+                        blend_pixel_lock_alpha(pixel, mask_val,
+                            color_r, color_g, color_b, opacity);
+                    } else if params.colorize >= 1.0 {
+                        blend_pixel_color(pixel, mask_val,
+                            color_r, color_g, color_b, opacity);
+                    } else if params.alpha_eraser < (SCALE as f32 - 1.0) / SCALE as f32 {
+                        blend_pixel_normal_eraser(pixel, mask_val,
+                            color_r, color_g, color_b, color_a, opacity);
                     } else {
-                        blend_pixel_normal(
-                            pixel.try_into().unwrap(),
-                            mask_val,
-                            color_r, color_g, color_b,
-                            opacity,
-                        );
+                        blend_pixel_normal(pixel, mask_val,
+                            color_r, color_g, color_b, opacity);
                     }
                 }
             }
@@ -177,36 +165,101 @@ impl Surface for TiledSurface {
         true
     }
 
-    fn get_color(&mut self, x: f32, y: f32, radius: f32, _paint: f32) -> (f32, f32, f32, f32) {
-        // Sample color at position — average over radius
-        let iradius = radius as i32;
-        let cx = x.round() as i32;
-        let cy = y.round() as i32;
-        let mut sum_r = 0.0;
-        let mut sum_g = 0.0;
-        let mut sum_b = 0.0;
-        let mut sum_a = 0.0;
-        let mut count = 0;
+    /// 对应 mypaint-tiled-surface.c:get_color + brushmodes.c:get_color_pixels_accumulate。
+    /// - paint < 0：legacy 模式（线性 RGB 加权平均）
+    /// - paint = 0：仅加性 RGB
+    /// - paint = 1：仅光谱
+    /// - 0 < paint < 1：两者混合
+    fn get_color(&mut self, x: f32, y: f32, radius: f32, paint: f32) -> (f32, f32, f32, f32) {
+        use crate::smudge::{rgb_to_spectral, spectral_to_rgb};
+        use crate::render::dab::{MaskParams, calculate_rr, calculate_opa};
 
-        for dy in -iradius..=iradius {
-            for dx in -iradius..=iradius {
-                if dx * dx + dy * dy > iradius * iradius { continue; }
-                let px = (cx + dx).clamp(0, self.width as i32 - 1) as usize;
-                let py = (cy + dy).clamp(0, self.height as i32 - 1) as usize;
-                let idx = self.pixel_index(px, py);
-                sum_r += self.pixel_buffer[idx] as f32 / SCALE as f32;
-                sum_g += self.pixel_buffer[idx + 1] as f32 / SCALE as f32;
-                sum_b += self.pixel_buffer[idx + 2] as f32 / SCALE as f32;
-                sum_a += self.pixel_buffer[idx + 3] as f32 / SCALE as f32;
-                count += 1;
-            }
-        }
-
-        if count == 0 {
+        if radius < 0.1 {
             return (0.0, 0.0, 0.0, 0.0);
         }
-        let inv = 1.0 / count as f32;
-        (sum_r * inv, sum_g * inv, sum_b * inv, sum_a * inv)
+
+        // dab-mask 形状：与渲染同样用 hardness=0.5, softness=0.5 的圆形 mask
+        let mask_params = MaskParams::from_hardness_softness(0.5, 0.5);
+        let one_over_radius2 = 1.0 / (radius * radius);
+        let r_fringe = radius + 1.0;
+        let x0 = ((x - r_fringe).floor() as i32).max(0) as usize;
+        let y0 = ((y - r_fringe).floor() as i32).max(0) as usize;
+        let x1 = ((x + r_fringe).floor() as i32).min(self.width as i32 - 1).max(0) as usize;
+        let y1 = ((y + r_fringe).floor() as i32).min(self.height as i32 - 1).max(0) as usize;
+        if x0 > x1 || y0 > y1 {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+
+        // Legacy fallback (paint < 0)：线性 RGB 加权平均，无光谱
+        if paint < 0.0 {
+            let mut sum_w: f32 = 0.0;
+            let (mut sr, mut sg, mut sb, mut sa) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+            for py in y0..=y1 {
+                for px in x0..=x1 {
+                    let rr = calculate_rr(px as i32, py as i32, x, y, 1.0, 0.0, 1.0, one_over_radius2);
+                    let opa = calculate_opa(rr, &mask_params);
+                    if opa <= 0.0 { continue; }
+                    let idx = self.pixel_index(px, py);
+                    sum_w += opa;
+                    sr += opa * self.pixel_buffer[idx] as f32 / SCALE as f32;
+                    sg += opa * self.pixel_buffer[idx + 1] as f32 / SCALE as f32;
+                    sb += opa * self.pixel_buffer[idx + 2] as f32 / SCALE as f32;
+                    sa += opa * self.pixel_buffer[idx + 3] as f32 / SCALE as f32;
+                }
+            }
+            if sum_w == 0.0 { return (0.0, 0.0, 0.0, 0.0); }
+            return (sr / sum_w, sg / sum_w, sb / sum_w, sa / sum_w);
+        }
+
+        // 标准路径：加性 + 可选光谱
+        let mut sum_a: f32 = 0.0;
+        let mut avg_spectral = [0.0f32; 10];
+        let mut avg_rgb = [0.0f32; 3];
+        let mut weight: f32 = 0.0;
+
+        for py in y0..=y1 {
+            for px in x0..=x1 {
+                let rr = calculate_rr(px as i32, py as i32, x, y, 1.0, 0.0, 1.0, one_over_radius2);
+                let opa = calculate_opa(rr, &mask_params);
+                if opa <= 0.0 { continue; }
+                let idx = self.pixel_index(px, py);
+                let pa = self.pixel_buffer[idx + 3] as f32 / SCALE as f32;
+                let a = opa * pa;
+                let alpha_sums = a + sum_a;
+                weight += opa;
+                let (fac_a, fac_b) = if alpha_sums > 0.0 {
+                    (a / alpha_sums, 1.0 - a / alpha_sums)
+                } else {
+                    (1.0, 1.0)
+                };
+                if pa > 0.0 {
+                    if paint > 0.0 {
+                        let spec = rgb_to_spectral(
+                            self.pixel_buffer[idx] as f32 / self.pixel_buffer[idx + 3] as f32,
+                            self.pixel_buffer[idx + 1] as f32 / self.pixel_buffer[idx + 3] as f32,
+                            self.pixel_buffer[idx + 2] as f32 / self.pixel_buffer[idx + 3] as f32);
+                        for i in 0..10 {
+                            avg_spectral[i] = spec[i].powf(fac_a) * avg_spectral[i].powf(fac_b);
+                        }
+                    }
+                    if paint < 1.0 {
+                        for i in 0..3 {
+                            avg_rgb[i] = self.pixel_buffer[idx + i] as f32 * fac_a / self.pixel_buffer[idx + 3] as f32
+                                + avg_rgb[i] * fac_b;
+                        }
+                    }
+                }
+                sum_a += a;
+            }
+        }
+        if weight == 0.0 { return (0.0, 0.0, 0.0, 0.0); }
+        let sum_a_norm = sum_a / weight;
+
+        let (spec_r, spec_g, spec_b) = spectral_to_rgb(&avg_spectral);
+        let r = spec_r * paint + (1.0 - paint) * avg_rgb[0];
+        let g = spec_g * paint + (1.0 - paint) * avg_rgb[1];
+        let b = spec_b * paint + (1.0 - paint) * avg_rgb[2];
+        (r, g, b, sum_a_norm)
     }
 
     fn begin_atomic(&mut self) {

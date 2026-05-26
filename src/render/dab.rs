@@ -1,7 +1,8 @@
-use crate::render::blend::{blend_pixel_normal, blend_pixel_eraser, blend_pixel_lock_alpha, blend_pixel_colorize, blend_pixel_posterize};
+//! Dab geometry: shape (calculate_rr) + opacity falloff (calculate_opa).
+//! 对应 mypaint-tiled-surface.c:237-373。
 
 /// Parameters for drawing a single dab.
-/// Aggregates the 15 parameters of the C `draw_dab` function.
+/// 汇总 C `draw_dab` 的 15 个参数。
 #[derive(Debug, Clone, Copy)]
 pub struct DabParams {
     pub x: f32,
@@ -23,39 +24,116 @@ pub struct DabParams {
     pub paint: f32,
 }
 
-/// Calculate the squared distance from center, accounting for elliptical dabs.
-/// Corresponds to `calculate_rr` in mypaint-tiled-surface.c.
-#[inline]
-pub fn calculate_rr(dx: f32, dy: f32, aspect_ratio: f32, angle: f32) -> f32 {
-    if aspect_ratio <= 1.0 {
-        dx * dx + dy * dy
-    } else {
-        let angle_rad = angle * std::f32::consts::PI / 180.0;
-        let cs = angle_rad.cos();
-        let sn = angle_rad.sin();
-        let yyr = (dy * cs - dx * sn) * aspect_ratio;
-        let xxr = dy * sn + dx * cs;
-        yyr * yyr + xxr * xxr
+/// Pre-computed mask falloff parameters.
+/// 对应 mypaint-tiled-surface.c:408-411。
+#[derive(Debug, Clone, Copy)]
+pub struct MaskParams {
+    pub hardness: f32,
+    pub segment1_offset: f32,
+    pub segment1_slope: f32,
+    pub segment2_offset: f32,
+    pub segment2_slope: f32,
+}
+
+impl MaskParams {
+    pub fn from_hardness_softness(hardness: f32, softness: f32) -> Self {
+        let hardness = hardness.clamp(0.0, 1.0);
+        let one_minus_softness = 1.0 - softness;
+        // segment1 covers rr in [0, hardness]
+        // segment2 covers rr in [hardness, 1.0]
+        let seg1_off = one_minus_softness;
+        let seg1_slope = -(1.0 / hardness - 1.0) * one_minus_softness;
+        let seg2_off = hardness / (1.0 - hardness) * one_minus_softness;
+        let seg2_slope = -hardness / (1.0 - hardness) * one_minus_softness;
+        Self {
+            hardness,
+            segment1_offset: seg1_off,
+            segment1_slope: seg1_slope,
+            segment2_offset: seg2_off,
+            segment2_slope: seg2_slope,
+        }
     }
 }
 
-/// Compute the dab mask value at a given distance from center.
-/// Returns a value in [0, SCALE] (SCALE = 2^15).
+/// rr = squared normalized distance from center (with aspect ratio + rotation).
+/// 对应 mypaint-tiled-surface.c:237-249 的 calculate_rr。
+///
+/// 参数：
+/// - `(xp, yp)`: 像素整数坐标
+/// - `(x, y)`: dab 中心
+/// - `aspect_ratio`: 椭圆长宽比 (≥1.0)
+/// - `(sn, cs)`: angle 的 sin/cos（弧度）
+/// - `one_over_radius2`: 1/(radius²)
 #[inline]
-pub fn dab_mask_value_scaled(rr: f32, radius: f32, hardness: f32, softness: f32) -> u16 {
-    let r = rr.sqrt();
-    let norm_r = r / radius;
-    if norm_r >= 1.0 {
-        return 0;
+pub fn calculate_rr(
+    xp: i32, yp: i32, x: f32, y: f32, aspect_ratio: f32,
+    sn: f32, cs: f32, one_over_radius2: f32,
+) -> f32 {
+    let yy = (yp as f32) + 0.5 - y;
+    let xx = (xp as f32) + 0.5 - x;
+    let yyr = (yy * cs - xx * sn) * aspect_ratio;
+    let xxr = yy * sn + xx * cs;
+    (yyr * yyr + xxr * xxr) * one_over_radius2
+}
+
+/// 计算一个像素点的不透明度（在 0..1）。
+/// 对应 mypaint-tiled-surface.c:357-373 的 calculate_opa。
+#[inline]
+pub fn calculate_opa(rr: f32, params: &MaskParams) -> f32 {
+    if rr > 1.0 {
+        return 0.0;
     }
-    let hard_edge = hardness;
-    let soft_edge = hardness + (1.0 - hardness) * softness;
-    let val = if norm_r <= hard_edge {
-        1.0
-    } else if norm_r >= soft_edge || soft_edge == hard_edge {
-        0.0
+    let (offset, slope) = if rr <= params.hardness {
+        (params.segment1_offset, params.segment1_slope)
     } else {
-        1.0 - (norm_r - hard_edge) / (soft_edge - hard_edge)
+        (params.segment2_offset, params.segment2_slope)
     };
-    (val * 32768.0) as u16
+    offset + rr * slope
+}
+
+/// Antialiased rr for small radii (radius < 3). 对应 calculate_rr_antialiased。
+/// 简化版本：取像素中心 + 邻边采样的距离平均。
+#[inline]
+pub fn calculate_rr_antialiased(
+    xp: i32, yp: i32, x: f32, y: f32, aspect_ratio: f32,
+    sn: f32, cs: f32, one_over_radius2: f32,
+    _r_aa_start: f32,
+) -> f32 {
+    // C 版本使用 nearest/farthest pixel-corner 距离的最近点优化；
+    // 这里先用简单中心采样保留几何正确性（小半径下的 AA 暂未严格匹配，
+    // 但 base 渲染的 calculate_rr 已经覆盖主流情况）。
+    calculate_rr(xp, yp, x, y, aspect_ratio, sn, cs, one_over_radius2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn center_pixel_has_full_opacity() {
+        let mp = MaskParams::from_hardness_softness(0.8, 0.0);
+        // At center (rr=0), opa = segment1_offset = 1.0
+        assert!((calculate_opa(0.0, &mp) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn edge_pixel_has_zero_opacity() {
+        let mp = MaskParams::from_hardness_softness(0.8, 0.0);
+        // At edge (rr=1), opa = segment2_offset + 1*segment2_slope
+        let v = calculate_opa(1.0, &mp);
+        assert!(v.abs() < 1e-6, "expected 0, got {v}");
+    }
+
+    #[test]
+    fn outside_dab_is_zero() {
+        let mp = MaskParams::from_hardness_softness(0.5, 0.0);
+        assert_eq!(calculate_opa(1.5, &mp), 0.0);
+    }
+
+    #[test]
+    fn rr_center_zero() {
+        // pixel at exactly center of dab → rr ≈ 0
+        let rr = calculate_rr(10, 10, 10.5, 10.5, 1.0, 0.0, 1.0, 1.0 / 25.0);
+        assert!(rr.abs() < 1e-6);
+    }
 }
