@@ -117,9 +117,12 @@ diff rust_trace.txt c_trace.txt
 
 | 项目 | C 上游 | 本实现 | 原因 |
 |------|--------|--------|------|
-| `FixedTiledSurface` 初始填充 | `0xFFFF` (memset 255) | `0u16` (透明黑) | C 上游用了非法像素值（超过 SCALE=32768），blend 公式会溢出导致"空心"渲染。MyPaint 应用层不踩这个 bug 是因为载入时 layer 像素会 alpha-blend 覆盖整个 tile。需要 bit-exact 复刻时用 `FixedTiledSurface::new_c_compat()`。|
+| `FixedTiledSurface` 初始填充 | `0xFFFF` (memset 255) | `0u16` (透明黑) | C 上游用了非法像素值（超过 SCALE=32768），blend 公式会溢出导致"空心"渲染。MyPaint 应用层不踩这个 bug 是因为载入时 layer 像素会 alpha-blend 覆盖整个 tile。|
 
-非随机笔刷在 `new_c_compat` 模式下 100% 像素与 C 上游一致；高随机笔刷（impressionism 等）因为浮点累积有 ~5% 局部漂移。
+`main` 分支在早期阶段提供过 `FixedTiledSurface::new_c_compat()`
+用于 100% bit-exact 复刻 C 上游（含其 bug）；`refactor/idiomatic-rust`
+分支已脱离"代码对代码 1:1 复刻"目标，仅保留功能对应 + FFI ABI 兼容，
+该 API 已删除。
 
 ## 致谢
 

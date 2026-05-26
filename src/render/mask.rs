@@ -151,13 +151,11 @@ const _: () = assert!(Coverage15::SCALE <= u16::MAX as u32);
 /// 15-bit fixed-point 乘法语义，丢失 newtype 的核心安全价值。需要做整数
 /// 运算请显式 `.raw()` 解包。
 ///
-/// `#[repr(transparent)]` 保证 layout、对齐、ABI 都与 u16 等价。任何 u16
-/// 位模式都是合法 `Premul15` 字面位（无 niche），所以
-/// `&mut [u16; 4]` ↔ `&mut [Premul15; 4]` 的内部 unsafe cast 是 sound 的
-/// （仅作为类型视图，不破坏 invariant）。注意：cast 到 `Premul15` 之后，
-/// 如果原 u16 是 OOR（例如 [`crate::surface::fixed::FixedTiledSurface::new_c_compat`]
-/// 用 0xFFFF 填的 tile），值类型上合法但语义上违反 invariant；blend 路径
-/// 的写入会通过 [`Self::from_scaled_u32`] 饱和回正确范围。
+/// `#[repr(transparent)]` + 无 niche 保证 layout、对齐、bit-pattern
+/// validity 都与 u16 等价，编译期 `const _ assert` 校验。因此
+/// `&mut [u16] ↔ &mut [Premul15]` 在 layout 层面是 sound 的 cast，
+/// [`Self::slice_as_u16_mut`] / [`Self::slice_as_u16`] 提供 safe 方向
+/// （Premul15 ⊆ u16）；反方向需要 unsafe 并由 caller 负责 invariant。
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Premul15(u16);
@@ -191,12 +189,9 @@ impl Premul15 {
     /// blend 算法专用：从 15-bit fixed-point 算式（如 `(a*b + c*d) / SCALE`）
     /// 转回 `Premul15`。**始终饱和**到 `0..=SCALE`，保住类型不变量。
     ///
-    /// 不加 `debug_assert!(v <= SCALE)` 的原因：
-    /// [`crate::surface::fixed::FixedTiledSurface::new_c_compat`] 模式下，
-    /// tile buffer 被 0xFFFF 填充（C 上游的 bug 的复刻），blend 读到 OOR
-    /// 输入会让中间结果合法地超过 SCALE。Saturating 既能防住 c_compat
-    /// 的合理 OOR，也能挡住真正的算法 bug。Algorithm bugs 通过单元测试和
-    /// CI 覆盖。
+    /// 不加 `debug_assert!(v <= SCALE)`：保住 invariant 是这里的硬要求
+    /// （Phase 3 `Vec<Premul15>` 存储依赖之），饱和是廉价的 defense-in-depth；
+    /// algorithm bugs 通过单元测试覆盖。
     #[inline]
     pub(crate) fn from_scaled_u32(v: u32) -> Self {
         Self(v.min(Self::SCALE) as u16)
@@ -207,7 +202,34 @@ impl Premul15 {
     pub const fn raw(self) -> u16 {
         self.0
     }
+
+    /// 把 `&mut [Premul15]` 重新解释为 `&mut [u16]`（layout-identical cast）。
+    ///
+    /// 安全的方向（Premul15 子集 ⊆ u16），不破坏类型不变量；用于 trait /
+    /// FFI 边界仍需暴露 raw `[u16]` 接口的场景。
+    #[inline]
+    pub fn slice_as_u16_mut(s: &mut [Self]) -> &mut [u16] {
+        // SAFETY: Premul15 is #[repr(transparent)] over u16 with no niches.
+        // Layout, alignment, and bit-pattern validity of [Premul15] and
+        // [u16] are identical, so reinterpreting the slice is sound. The
+        // resulting [u16] inherits the borrow semantics of the input.
+        unsafe { std::slice::from_raw_parts_mut(s.as_mut_ptr() as *mut u16, s.len()) }
+    }
+
+    /// 把 `&[Premul15]` 重新解释为 `&[u16]`。
+    #[inline]
+    pub fn slice_as_u16(s: &[Self]) -> &[u16] {
+        // SAFETY: same as `slice_as_u16_mut` — layout/align/validity equiv.
+        unsafe { std::slice::from_raw_parts(s.as_ptr() as *const u16, s.len()) }
+    }
 }
+
+// size/align must match u16 for the unsafe casts in `slice_as_u16*` and in
+// `iter_rle_mask*` (cast to `[Premul15; 4]` view) to be sound.
+const _: () = {
+    assert!(std::mem::size_of::<Premul15>() == std::mem::size_of::<u16>());
+    assert!(std::mem::align_of::<Premul15>() == std::mem::align_of::<u16>());
+};
 
 // ============================================================================
 // RleEntry — 集中化的 mask buffer decode

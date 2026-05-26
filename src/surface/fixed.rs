@@ -1,6 +1,7 @@
 //! Fixed-size tiled surface.
 //! 对应 mypaint-fixed-tiled-surface.c。固定大小画布，按 tile 切分存储。
 
+use crate::render::mask::Premul15;
 use crate::surface::tile::{TileBackend, TileRequest, TiledSurface, TILE_BUFFER_LEN, TILE_SIZE};
 use std::path::Path;
 
@@ -11,9 +12,10 @@ pub struct FixedTileBackend {
     height: usize,
     tiles_width: usize,
     tiles_height: usize,
-    /// 所有 tile 的连续存储：tiles_width × tiles_height × TILE_BUFFER_LEN
-    tile_buffer: Vec<u16>,
-    null_tile: Vec<u16>,
+    /// 所有 tile 的连续 premultiplied RGBA 存储：
+    /// `tiles_width × tiles_height × TILE_BUFFER_LEN` 个 [`Premul15`]。
+    tile_buffer: Vec<Premul15>,
+    null_tile: Vec<Premul15>,
 }
 
 /// 单个 tile 的可变 buffer 指针 + 元数据。供并行渲染用，调用者要保证
@@ -23,7 +25,9 @@ pub struct TileSlot {
     pub tx: i32,
     pub ty: i32,
     /// raw ptr 指向 tile 的 u16 buffer（长度 TILE_BUFFER_LEN）。
-    /// 不同 TileSlot 的指针保证互不重叠。
+    /// 不同 TileSlot 的指针保证互不重叠。内部存储是 [`Premul15`]，
+    /// 通过 `#[repr(transparent)]` 重新解释为 `*mut u16`，供 process_op
+    /// 等接受 `&mut [u16]` 的 API 使用。
     pub buffer: *mut u16,
 }
 
@@ -33,32 +37,12 @@ unsafe impl Send for TileSlot {}
 unsafe impl Sync for TileSlot {}
 
 impl FixedTileBackend {
-    /// 创建一个固定大小画布的 backend。
-    ///
-    /// # 与 C 上游的差异
-    /// C 上游 `mypaint-fixed-tiled-surface.c:126` 使用 `memset(buffer, 255, buffer_size)`，
-    /// 即每个 u16 = `0xFFFF` = 65535。**注意这超过了合法像素范围 0..=SCALE (32768)，
-    /// 在 blend 公式中会产生溢出导致"空心"渲染**。这是 C 上游的边缘 case bug
-    /// （正常使用场景中，MyPaint 应用先 alpha-blend layer 像素覆盖 tile，
-    /// 这个非法初始值永远看不到）。
-    ///
-    /// 本实现选择透明黑 `0u16` 作为初始值，确保 blend 公式数学正确。
-    /// 如需 100% bit-exact 匹配 C 上游（包括其 bug），使用 [`Self::new_c_compat`]。
+    /// 创建一个固定大小画布的 backend。背景初始为透明黑（[`Premul15::ZERO`]）。
     pub fn new(width: usize, height: usize) -> Self {
-        Self::new_with_fill(width, height, 0u16)
-    }
-
-    /// C 上游 bit-exact 兼容模式：用 `0xFFFF` 初始化 tile buffer。
-    /// 仅用于复刻验证或与 C 上游行为完全等价的场景；普通用途请用 [`Self::new`]。
-    pub fn new_c_compat(width: usize, height: usize) -> Self {
-        Self::new_with_fill(width, height, 0xFFFFu16)
-    }
-
-    fn new_with_fill(width: usize, height: usize, fill: u16) -> Self {
         let tiles_width = width.div_ceil(TILE_SIZE);
         let tiles_height = height.div_ceil(TILE_SIZE);
-        let tile_buffer = vec![fill; tiles_width * tiles_height * TILE_BUFFER_LEN];
-        let null_tile = vec![0u16; TILE_BUFFER_LEN];
+        let tile_buffer = vec![Premul15::ZERO; tiles_width * tiles_height * TILE_BUFFER_LEN];
+        let null_tile = vec![Premul15::ZERO; TILE_BUFFER_LEN];
         Self {
             width,
             height,
@@ -76,7 +60,7 @@ impl FixedTileBackend {
         self.height
     }
 
-    /// 计算 tile (tx, ty) 在 buffer 中的起始 u16 偏移。
+    /// 计算 tile (tx, ty) 在 buffer 中的起始偏移（按 [`Premul15`] 个数计）。
     /// 越界返回 None。
     fn tile_offset(&self, tx: i32, ty: i32) -> Option<usize> {
         if tx < 0 || ty < 0 {
@@ -92,7 +76,7 @@ impl FixedTileBackend {
     }
 
     fn reset_null_tile(&mut self) {
-        self.null_tile.iter_mut().for_each(|v| *v = 0);
+        self.null_tile.iter_mut().for_each(|v| *v = Premul15::ZERO);
     }
 
     /// 为并行渲染收集多个不重叠 tile 的可变指针。
@@ -102,7 +86,9 @@ impl FixedTileBackend {
     /// 内存不重叠，可并行使用。
     #[doc(hidden)]
     pub unsafe fn parallel_tile_slots(&mut self, tiles: &[(i32, i32)]) -> Vec<TileSlot> {
-        let base_ptr = self.tile_buffer.as_mut_ptr();
+        // 用 *mut u16 暴露给 process_op；Premul15 的 #[repr(transparent)]
+        // 保证 layout 等价。
+        let base_ptr = self.tile_buffer.as_mut_ptr() as *mut u16;
         tiles
             .iter()
             .filter_map(|&(tx, ty)| {
@@ -119,10 +105,14 @@ impl FixedTileBackend {
 
 impl TileBackend for FixedTileBackend {
     fn tile_request_start<'a>(&'a mut self, req: &TileRequest) -> &'a mut [u16] {
-        match self.tile_offset(req.tx, req.ty) {
+        // backend 内部用 Vec<Premul15>，trait 仍按 [u16] 接口暴露给 caller
+        // （process_op / blend 等接受 &mut [u16] 然后内部 cast 回 Premul15
+        // slice）。这里用 safe 方向的 slice cast (Premul15 ⊆ u16)。
+        let slice = match self.tile_offset(req.tx, req.ty) {
             Some(off) => &mut self.tile_buffer[off..off + TILE_BUFFER_LEN],
             None => &mut self.null_tile[..],
-        }
+        };
+        Premul15::slice_as_u16_mut(slice)
     }
 
     fn tile_request_end(&mut self, req: &TileRequest) {
@@ -134,7 +124,8 @@ impl TileBackend for FixedTileBackend {
 
     fn tile_snapshot(&mut self, tx: i32, ty: i32) -> Option<Vec<u16>> {
         let off = self.tile_offset(tx, ty)?;
-        Some(self.tile_buffer[off..off + TILE_BUFFER_LEN].to_vec())
+        // 返回 raw u16 Vec 给外部消费者（FFI / 检查点工具）。
+        Some(Premul15::slice_as_u16(&self.tile_buffer[off..off + TILE_BUFFER_LEN]).to_vec())
     }
 
     fn save_png(&mut self, path: &Path, x: i32, y: i32, width: i32, height: i32) {
@@ -159,10 +150,11 @@ impl TileBackend for FixedTileBackend {
                 if let Some(off) = self.tile_offset(tx, ty) {
                     let pix_idx = off + (in_tile_y * TILE_SIZE + in_tile_x) * 4;
                     let dst = (py * w + px) * 4;
-                    png_data[dst] = (self.tile_buffer[pix_idx] >> 7) as u8;
-                    png_data[dst + 1] = (self.tile_buffer[pix_idx + 1] >> 7) as u8;
-                    png_data[dst + 2] = (self.tile_buffer[pix_idx + 2] >> 7) as u8;
-                    png_data[dst + 3] = (self.tile_buffer[pix_idx + 3] >> 7) as u8;
+                    // 15-bit premul → 8-bit sRGB-ish 截断（与 C 上游一致 >> 7）
+                    png_data[dst] = (self.tile_buffer[pix_idx].raw() >> 7) as u8;
+                    png_data[dst + 1] = (self.tile_buffer[pix_idx + 1].raw() >> 7) as u8;
+                    png_data[dst + 2] = (self.tile_buffer[pix_idx + 2].raw() >> 7) as u8;
+                    png_data[dst + 3] = (self.tile_buffer[pix_idx + 3].raw() >> 7) as u8;
                 }
             }
         }
@@ -190,20 +182,9 @@ pub struct FixedTiledSurface {
 }
 
 impl FixedTiledSurface {
-    /// 创建一个固定大小的画布。背景初始为透明黑 (0)。
+    /// 创建一个固定大小的画布。背景初始为透明黑 ([`Premul15::ZERO`])。
     pub fn new(width: usize, height: usize) -> Self {
         let backend = Box::new(FixedTileBackend::new(width, height));
-        Self {
-            inner: TiledSurface::with_backend(backend),
-            width,
-            height,
-        }
-    }
-
-    /// C 上游 bit-exact 兼容模式。背景初始为 0xFFFF（与 C 的 memset 255 一致），
-    /// 见 [`FixedTileBackend::new_c_compat`] 的详细说明。
-    pub fn new_c_compat(width: usize, height: usize) -> Self {
-        let backend = Box::new(FixedTileBackend::new_c_compat(width, height));
         Self {
             inner: TiledSurface::with_backend(backend),
             width,
