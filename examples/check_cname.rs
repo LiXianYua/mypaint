@@ -2,7 +2,10 @@ fn main() {
     use libmypaint::BrushSetting;
     let s = BrushSetting::from_cname("elliptical_dab_ratio");
     println!("elliptical_dab_ratio → {:?}", s);
-    println!("EllipticalDabRatio idx = {}", BrushSetting::EllipticalDabRatio as usize);
+    println!(
+        "EllipticalDabRatio idx = {}",
+        BrushSetting::EllipticalDabRatio as usize
+    );
 
     // 加载 charcoal 并打印 base value
     use libmypaint::Brush;

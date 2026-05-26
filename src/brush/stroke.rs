@@ -11,14 +11,14 @@
 //! - mypaint_brush_stroke_to (L1300-1547)
 
 use crate::brush::Brush;
-use crate::surface::Surface;
-use crate::render::DabParams;
-use crate::BrushSetting;
-use crate::BrushInput;
-use crate::NUM_INPUTS;
-use crate::util::helpers::{mod_arith, smallest_angular_difference, rand_gauss, WGM_EPSILON};
-use crate::smudge::mix_colors;
 use crate::render::color::*;
+use crate::render::DabParams;
+use crate::smudge::mix_colors;
+use crate::surface::Surface;
+use crate::util::helpers::{mod_arith, rand_gauss, smallest_angular_difference, WGM_EPSILON};
+use crate::BrushInput;
+use crate::BrushSetting;
+use crate::NUM_INPUTS;
 
 const ACTUAL_RADIUS_MIN: f32 = 0.2;
 const ACTUAL_RADIUS_MAX: f32 = 1000.0;
@@ -36,7 +36,10 @@ const PREV_COL_A: usize = 7;
 const PREV_COL_RECENTNESS: usize = 8;
 const SMUDGE_BUCKET_SIZE: usize = 9;
 
-struct Offsets { x: f32, y: f32 }
+struct Offsets {
+    x: f32,
+    y: f32,
+}
 
 /// Macro-like helper: setting base value (对应 C 的 BASEVAL 宏)。
 #[inline]
@@ -109,7 +112,8 @@ impl Brush {
         let offset_asc_mirror = 0.0f32.max(setting(self, BrushSetting::OffsetAngle2Asc));
         if offset_asc_mirror != 0.0 {
             let ascension = self.state.ascension;
-            let asc_angle = (ascension - view_rotation + offset_angle_adj * brush_flip as f32).to_radians();
+            let asc_angle =
+                (ascension - view_rotation + offset_angle_adj * brush_flip as f32).to_radians();
             let offset_factor = brush_flip as f32 * offset_asc_mirror;
             dx += asc_angle.cos() * offset_factor;
             dy += asc_angle.sin() * offset_factor;
@@ -136,11 +140,20 @@ impl Brush {
     // update_states_and_setting_values — mypaint-brush.c:708-904
     // =========================================================================
 
-    fn update_states(&mut self,
-        step_ddab: f32, step_dx: f32, step_dy: f32,
-        step_dpressure: f32, step_declination: f32, step_ascension: f32,
-        step_dtime: f32, step_viewzoom: f32, step_viewrotation: f32,
-        step_declinationx: f32, step_declinationy: f32, step_barrel_rotation: f32,
+    fn update_states(
+        &mut self,
+        step_ddab: f32,
+        step_dx: f32,
+        step_dy: f32,
+        step_dpressure: f32,
+        step_declination: f32,
+        step_ascension: f32,
+        step_dtime: f32,
+        step_viewzoom: f32,
+        step_viewrotation: f32,
+        step_declinationx: f32,
+        step_declinationy: f32,
+        step_barrel_rotation: f32,
     ) {
         let mut step_dtime = step_dtime;
         if step_dtime < 0.0 {
@@ -171,8 +184,10 @@ impl Brush {
             let scale_x = setting(self, BrushSetting::GridmapScaleX);
             let scale_y = setting(self, BrushSetting::GridmapScaleY);
             let scaled_size = scale * GRID_SIZE;
-            self.state.gridmap_x = mod_arith((x * scale_x).abs(), scaled_size) / scaled_size * GRID_SIZE;
-            self.state.gridmap_y = mod_arith((y * scale_y).abs(), scaled_size) / scaled_size * GRID_SIZE;
+            self.state.gridmap_x =
+                mod_arith((x * scale_x).abs(), scaled_size) / scaled_size * GRID_SIZE;
+            self.state.gridmap_y =
+                mod_arith((y * scale_y).abs(), scaled_size) / scaled_size * GRID_SIZE;
             if x < 0.0 {
                 self.state.gridmap_x = GRID_SIZE - self.state.gridmap_x;
             }
@@ -184,7 +199,9 @@ impl Brush {
         let base_radius = baseval(self, BrushSetting::RadiusLogarithmic).exp();
         self.state.barrel_rotation += step_barrel_rotation;
 
-        if self.state.pressure <= 0.0 { self.state.pressure = 0.0; }
+        if self.state.pressure <= 0.0 {
+            self.state.pressure = 0.0;
+        }
         let pressure = self.state.pressure;
 
         // start / end stroke
@@ -205,7 +222,9 @@ impl Brush {
         let norm_dy = step_dy / step_dtime * self.state.viewzoom;
         let norm_speed = (norm_dx * norm_dx + norm_dy * norm_dy).sqrt();
         let norm_dist = ((step_dx / step_dtime / base_radius).powi(2)
-            + (step_dy / step_dtime / base_radius).powi(2)).sqrt() * step_dtime;
+            + (step_dy / step_dtime / base_radius).powi(2))
+        .sqrt()
+            * step_dtime;
 
         let mut inputs = [0.0; NUM_INPUTS];
 
@@ -214,7 +233,8 @@ impl Brush {
             inputs[id as usize] = val;
         };
 
-        inputs[BrushInput::Pressure as usize] = pressure * baseval(self, BrushSetting::PressureGainLog).exp();
+        inputs[BrushInput::Pressure as usize] =
+            pressure * baseval(self, BrushSetting::PressureGainLog).exp();
 
         let m0 = self.speed_mapping_m[0];
         let q0 = self.speed_mapping_q[0];
@@ -232,17 +252,21 @@ impl Brush {
         let dir_angle = self.state.direction_dy.atan2(self.state.direction_dx);
         inputs[BrushInput::Direction as usize] =
             mod_arith(dir_angle.to_degrees() + viewrotation + 180.0, 180.0);
-        let dir_angle_360 = self.state.direction_angle_dy.atan2(self.state.direction_angle_dx);
+        let dir_angle_360 = self
+            .state
+            .direction_angle_dy
+            .atan2(self.state.direction_angle_dx);
         inputs[BrushInput::DirectionAngle as usize] =
             (dir_angle_360.to_degrees() + viewrotation + 360.0) % 360.0;
         inputs[BrushInput::TiltDeclination as usize] = self.state.declination;
         inputs[BrushInput::TiltAscension as usize] =
             mod_arith(self.state.ascension + viewrotation + 180.0, 360.0) - 180.0;
-        inputs[BrushInput::Viewzoom as usize] =
-            baseval(self, BrushSetting::RadiusLogarithmic) - (base_radius / self.state.viewzoom).ln();
-        inputs[BrushInput::AttackAngle as usize] =
-            smallest_angular_difference(self.state.ascension,
-                mod_arith(dir_angle_360.to_degrees() + 90.0, 360.0));
+        inputs[BrushInput::Viewzoom as usize] = baseval(self, BrushSetting::RadiusLogarithmic)
+            - (base_radius / self.state.viewzoom).ln();
+        inputs[BrushInput::AttackAngle as usize] = smallest_angular_difference(
+            self.state.ascension,
+            mod_arith(dir_angle_360.to_degrees() + 90.0, 360.0),
+        );
         inputs[BrushInput::BrushRadius as usize] = baseval(self, BrushSetting::RadiusLogarithmic);
 
         inputs[BrushInput::GridmapX as usize] = self.state.gridmap_x.clamp(0.0, GRID_SIZE);
@@ -264,31 +288,43 @@ impl Brush {
             self.settings_value[BrushSetting::DabsPerBasicRadius as usize];
         self.state.dabs_per_actual_radius =
             self.settings_value[BrushSetting::DabsPerActualRadius as usize];
-        self.state.dabs_per_second =
-            self.settings_value[BrushSetting::DabsPerSecond as usize];
+        self.state.dabs_per_second = self.settings_value[BrushSetting::DabsPerSecond as usize];
 
         // slow position tracking per dab
         {
-            let fac = 1.0 - Self::exp_decay(
-                self.settings_value[BrushSetting::SlowTrackingPerDab as usize], step_ddab);
+            let fac = 1.0
+                - Self::exp_decay(
+                    self.settings_value[BrushSetting::SlowTrackingPerDab as usize],
+                    step_ddab,
+                );
             self.state.actual_x += (self.state.x - self.state.actual_x) * fac;
             self.state.actual_y += (self.state.y - self.state.actual_y) * fac;
         }
 
         // slow speed
         {
-            let fac1 = 1.0 - Self::exp_decay(
-                self.settings_value[BrushSetting::Speed1Slowness as usize], step_dtime);
+            let fac1 = 1.0
+                - Self::exp_decay(
+                    self.settings_value[BrushSetting::Speed1Slowness as usize],
+                    step_dtime,
+                );
             self.state.norm_speed1_slow += (norm_speed - self.state.norm_speed1_slow) * fac1;
-            let fac2 = 1.0 - Self::exp_decay(
-                self.settings_value[BrushSetting::Speed2Slowness as usize], step_dtime);
+            let fac2 = 1.0
+                - Self::exp_decay(
+                    self.settings_value[BrushSetting::Speed2Slowness as usize],
+                    step_dtime,
+                );
             self.state.norm_speed2_slow += (norm_speed - self.state.norm_speed2_slow) * fac2;
         }
 
         // slow speed vector
         {
-            let mut time_constant = (self.settings_value[BrushSetting::OffsetBySpeedSlowness as usize] * 0.01).exp() - 1.0;
-            if time_constant < 0.002 { time_constant = 0.002; }
+            let mut time_constant =
+                (self.settings_value[BrushSetting::OffsetBySpeedSlowness as usize] * 0.01).exp()
+                    - 1.0;
+            if time_constant < 0.002 {
+                time_constant = 0.002;
+            }
             let fac = 1.0 - Self::exp_decay(time_constant, step_dtime);
             self.state.norm_dx_slow += (norm_dx - self.state.norm_dx_slow) * fac;
             self.state.norm_dy_slow += (norm_dy - self.state.norm_dy_slow) * fac;
@@ -299,9 +335,11 @@ impl Brush {
             let mut dx = step_dx * self.state.viewzoom;
             let mut dy = step_dy * self.state.viewzoom;
             let step_in_dabtime = (dx * dx + dy * dy).sqrt();
-            let fac = 1.0 - Self::exp_decay(
-                (self.settings_value[BrushSetting::DirectionFilter as usize] * 0.5).exp() - 1.0,
-                step_in_dabtime);
+            let fac = 1.0
+                - Self::exp_decay(
+                    (self.settings_value[BrushSetting::DirectionFilter as usize] * 0.5).exp() - 1.0,
+                    step_in_dabtime,
+                );
 
             let dx_old = self.state.direction_dx;
             let dy_old = self.state.direction_dy;
@@ -323,15 +361,20 @@ impl Brush {
 
         // custom input
         {
-            let fac = 1.0 - Self::exp_decay(
-                self.settings_value[BrushSetting::CustomInputSlowness as usize], 0.1);
-            self.state.custom_input += (
-                self.settings_value[BrushSetting::CustomInput as usize] - self.state.custom_input) * fac;
+            let fac = 1.0
+                - Self::exp_decay(
+                    self.settings_value[BrushSetting::CustomInputSlowness as usize],
+                    0.1,
+                );
+            self.state.custom_input += (self.settings_value[BrushSetting::CustomInput as usize]
+                - self.state.custom_input)
+                * fac;
         }
 
         // stroke length
         {
-            let frequency = (-self.settings_value[BrushSetting::StrokeDurationLogarithmic as usize]).exp();
+            let frequency =
+                (-self.settings_value[BrushSetting::StrokeDurationLogarithmic as usize]).exp();
             let stroke = 0.0f32.max(self.state.stroke + norm_dist * frequency);
             let wrap = 1.0 + self.settings_value[BrushSetting::StrokeHoldtime as usize].max(0.0);
             if stroke >= wrap && wrap > 10.9 {
@@ -357,7 +400,9 @@ impl Brush {
         self.state.actual_elliptical_dab_ratio =
             self.settings_value[BrushSetting::EllipticalDabRatio as usize];
         self.state.actual_elliptical_dab_angle = mod_arith(
-            self.settings_value[BrushSetting::EllipticalDabAngle as usize] - viewrotation + 180.0, 180.0) - 180.0;
+            self.settings_value[BrushSetting::EllipticalDabAngle as usize] - viewrotation + 180.0,
+            180.0,
+        ) - 180.0;
     }
 
     // =========================================================================
@@ -432,8 +477,8 @@ impl Brush {
 
         let opaque_linearize = baseval(self, BrushSetting::OpaqueLinearize);
         if opaque_linearize != 0.0 {
-            let dabs_per_pixel = (self.state.dabs_per_actual_radius
-                + self.state.dabs_per_basic_radius) * 2.0;
+            let dabs_per_pixel =
+                (self.state.dabs_per_actual_radius + self.state.dabs_per_basic_radius) * 2.0;
             let dabs_per_pixel = 1.0f32.max(dabs_per_pixel);
             let dabs_per_pixel = 1.0 + opaque_linearize * (dabs_per_pixel - 1.0);
 
@@ -481,7 +526,9 @@ impl Brush {
         }
 
         let paint_factor = self.settings_value[BrushSetting::PaintMode as usize];
-        let paint_setting_constant = self.settings[BrushSetting::PaintMode as usize].mapping().is_constant();
+        let paint_setting_constant = self.settings[BrushSetting::PaintMode as usize]
+            .mapping()
+            .is_constant();
         let legacy_smudge = paint_factor <= 0.0 && paint_setting_constant;
 
         // color part — convert HSV to RGB
@@ -492,20 +539,30 @@ impl Brush {
 
         // update smudge color
         let smudge_length = self.settings_value[BrushSetting::SmudgeLength as usize];
-        if smudge_length < 1.0 && (
-            self.settings_value[BrushSetting::Smudge as usize] != 0.0
-            || !self.settings[BrushSetting::Smudge as usize].mapping().is_constant()
-        ) {
+        if smudge_length < 1.0
+            && (self.settings_value[BrushSetting::Smudge as usize] != 0.0
+                || !self.settings[BrushSetting::Smudge as usize]
+                    .mapping()
+                    .is_constant())
+        {
             let smudge_length_log = self.settings_value[BrushSetting::SmudgeLengthLog as usize];
             let smudge_radius_log = self.settings_value[BrushSetting::SmudgeRadiusLog as usize];
             let smudge_op_lim = self.settings_value[BrushSetting::SmudgeTransparency as usize];
             let return_early = {
                 let bucket = self.fetch_smudge_bucket_mut();
                 update_smudge_color_fn(
-                    surface, bucket,
-                    smudge_length, smudge_length_log, smudge_radius_log, smudge_op_lim,
-                    x.round() as i32, y.round() as i32, radius,
-                    legacy_smudge, paint_factor)
+                    surface,
+                    bucket,
+                    smudge_length,
+                    smudge_length_log,
+                    smudge_radius_log,
+                    smudge_op_lim,
+                    x.round() as i32,
+                    y.round() as i32,
+                    radius,
+                    legacy_smudge,
+                    paint_factor,
+                )
             };
             if return_early {
                 return false;
@@ -517,8 +574,14 @@ impl Brush {
         if smudge_value > 0.0 {
             let bucket_copy = *self.fetch_smudge_bucket_ref();
             eraser_target_alpha = apply_smudge_fn(
-                &bucket_copy, smudge_value, legacy_smudge, paint_factor,
-                &mut color_h, &mut color_s, &mut color_v);
+                &bucket_copy,
+                smudge_value,
+                legacy_smudge,
+                paint_factor,
+                &mut color_h,
+                &mut color_s,
+                &mut color_v,
+            );
         }
 
         // eraser
@@ -528,12 +591,10 @@ impl Brush {
         }
 
         // HSV/HSL color dynamics
-        let using_hsv_dynamics =
-            self.settings_value[BrushSetting::ChangeColorH as usize] != 0.0
+        let using_hsv_dynamics = self.settings_value[BrushSetting::ChangeColorH as usize] != 0.0
             || self.settings_value[BrushSetting::ChangeColorHsvS as usize] != 0.0
             || self.settings_value[BrushSetting::ChangeColorV as usize] != 0.0;
-        let using_hsl_dynamics =
-            self.settings_value[BrushSetting::ChangeColorL as usize] != 0.0
+        let using_hsl_dynamics = self.settings_value[BrushSetting::ChangeColorL as usize] != 0.0
             || self.settings_value[BrushSetting::ChangeColorHslS as usize] != 0.0;
         let using_color_dynamics = using_hsv_dynamics || using_hsl_dynamics;
 
@@ -548,7 +609,8 @@ impl Brush {
         if using_hsv_dynamics {
             rgb_to_hsv(&mut color_h, &mut color_s, &mut color_v);
             color_h += self.settings_value[BrushSetting::ChangeColorH as usize];
-            color_s += color_s * color_v * self.settings_value[BrushSetting::ChangeColorHsvS as usize];
+            color_s +=
+                color_s * color_v * self.settings_value[BrushSetting::ChangeColorHsvS as usize];
             color_v += self.settings_value[BrushSetting::ChangeColorV as usize];
             hsv_to_rgb(&mut color_h, &mut color_s, &mut color_v);
         }
@@ -557,7 +619,9 @@ impl Brush {
         if using_hsl_dynamics {
             rgb_to_hsl(&mut color_h, &mut color_s, &mut color_v);
             color_v += self.settings_value[BrushSetting::ChangeColorL as usize];
-            color_s += color_s * (1.0 - color_v).abs().min(color_v.abs()) * 2.0
+            color_s += color_s
+                * (1.0 - color_v).abs().min(color_v.abs())
+                * 2.0
                 * self.settings_value[BrushSetting::ChangeColorHslS as usize];
             hsl_to_rgb(&mut color_h, &mut color_s, &mut color_v);
         }
@@ -610,12 +674,22 @@ impl Brush {
         let posterize_num = self.settings_value[BrushSetting::PosterizeNum as usize];
 
         surface.draw_dab(&DabParams {
-            x, y, radius,
-            color_r: color_h, color_g: color_s, color_b: color_v,
-            opaque, hardness, softness,
+            x,
+            y,
+            radius,
+            color_r: color_h,
+            color_g: color_s,
+            color_b: color_v,
+            opaque,
+            hardness,
+            softness,
             alpha_eraser: eraser_target_alpha,
-            aspect_ratio: dab_ratio, angle: dab_angle,
-            lock_alpha, colorize, posterize, posterize_num,
+            aspect_ratio: dab_ratio,
+            angle: dab_angle,
+            lock_alpha,
+            colorize,
+            posterize,
+            posterize_num,
             paint: paint_factor,
         })
     }
@@ -626,7 +700,9 @@ impl Brush {
 
     fn count_dabs(&mut self, x: f32, y: f32, dtime: f32) -> f32 {
         let base_radius_log = baseval(self, BrushSetting::RadiusLogarithmic);
-        let base_radius = base_radius_log.exp().clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
+        let base_radius = base_radius_log
+            .exp()
+            .clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
 
         if self.state.actual_radius == 0.0 {
             self.state.actual_radius = base_radius;
@@ -650,7 +726,11 @@ impl Brush {
         let res2 = dist / base_radius * self.state.dabs_per_basic_radius;
         let res3 = dtime * self.state.dabs_per_second;
         let res4 = res1 + res2 + res3;
-        if res4.is_nan() || res4 < 0.0 { 0.0 } else { res4 }
+        if res4.is_nan() || res4 < 0.0 {
+            0.0
+        } else {
+            res4
+        }
     }
 
     // =========================================================================
@@ -660,12 +740,20 @@ impl Brush {
     /// Main stroke entry point.
     /// Corresponds to `mypaint_brush_stroke_to` (L1300-1547).
     /// Returns true if the stroke is finished or should be split.
-    pub fn stroke_to(&mut self, surface: &mut dyn Surface,
-        x: f32, y: f32, pressure: f32,
-        xtilt: f32, ytilt: f32,
-        dtime: f64, viewzoom: f32, viewrotation: f32,
-        barrel_rotation: f32, linear: bool) -> bool
-    {
+    pub fn stroke_to(
+        &mut self,
+        surface: &mut dyn Surface,
+        x: f32,
+        y: f32,
+        pressure: f32,
+        xtilt: f32,
+        ytilt: f32,
+        dtime: f64,
+        viewzoom: f32,
+        viewrotation: f32,
+        barrel_rotation: f32,
+        linear: bool,
+    ) -> bool {
         let max_dtime = 5.0;
         let mut dtime = dtime;
 
@@ -689,9 +777,7 @@ impl Brush {
         }
 
         let pressure = if pressure <= 0.0 { 0.0 } else { pressure };
-        if !x.is_finite() || !y.is_finite()
-            || x > 1e10 || y > 1e10 || x < -1e10 || y < -1e10
-        {
+        if !x.is_finite() || !y.is_finite() || x > 1e10 || y > 1e10 || x < -1e10 || y < -1e10 {
             eprintln!("Warning: ignoring brush::stroke_to with insane inputs (x = {x}, y = {y})");
             // Reset to safe values
             return true;
@@ -701,12 +787,25 @@ impl Brush {
         if dtime < 0.0 {
             eprintln!("Time jumped backwards by dtime={dtime} seconds!");
         }
-        if dtime <= 0.0 { dtime = 0.0001; }
+        if dtime <= 0.0 {
+            dtime = 0.0001;
+        }
 
         // Workaround for tablets that don't report motion without pressure
         if dtime > 0.1 && pressure != 0.0 && self.state.pressure == 0.0 {
-            self.stroke_to(surface, x, y, 0.0,
-                90.0, 0.0, dtime - 0.0001, viewzoom, viewrotation, 0.0, linear);
+            self.stroke_to(
+                surface,
+                x,
+                y,
+                0.0,
+                90.0,
+                0.0,
+                dtime - 0.0001,
+                viewzoom,
+                viewrotation,
+                0.0,
+                linear,
+            );
             dtime = 0.0001;
         }
 
@@ -748,9 +847,11 @@ impl Brush {
         }
 
         // slow_tracking fac — 仅修改局部 filtered_x/y，不写 state.x/state.y
-        let fac = 1.0 - Self::exp_decay(
-            baseval(self, BrushSetting::SlowTracking),
-            100.0 * dtime as f32);
+        let fac = 1.0
+            - Self::exp_decay(
+                baseval(self, BrushSetting::SlowTracking),
+                100.0 * dtime as f32,
+            );
         let input_x = self.state.x + (effective_x - self.state.x) * fac;
         let input_y = self.state.y + (effective_y - self.state.y) * fac;
 
@@ -780,9 +881,18 @@ impl Brush {
         let mut dabs_todo = self.count_dabs(input_x, input_y, dtime as f32);
 
         while dabs_moved + dabs_todo >= 1.0 {
-            let (step_ddab, step_dx, step_dy, step_dpressure, step_dtime,
-                 step_declination, step_ascension, step_declinationx, step_declinationy,
-                 step_barrel_rotation) = {
+            let (
+                step_ddab,
+                step_dx,
+                step_dy,
+                step_dpressure,
+                step_dtime,
+                step_declination,
+                step_ascension,
+                step_declinationx,
+                step_declinationy,
+                step_barrel_rotation,
+            ) = {
                 if dabs_moved > 0.001 {
                     let step_ddab = 1.0 - dabs_moved;
                     dabs_moved = 0.0;
@@ -797,7 +907,10 @@ impl Brush {
                         frac * smallest_angular_difference(self.state.ascension, tilt_ascension),
                         frac * (tilt_declinationx - self.state.declinationx),
                         frac * (tilt_declinationy - self.state.declinationy),
-                        frac * smallest_angular_difference(self.state.barrel_rotation, barrel_rotation * 360.0),
+                        frac * smallest_angular_difference(
+                            self.state.barrel_rotation,
+                            barrel_rotation * 360.0,
+                        ),
                     )
                 } else {
                     let frac = 1.0 / dabs_todo;
@@ -811,16 +924,29 @@ impl Brush {
                         frac * smallest_angular_difference(self.state.ascension, tilt_ascension),
                         frac * (tilt_declinationx - self.state.declinationx),
                         frac * (tilt_declinationy - self.state.declinationy),
-                        frac * smallest_angular_difference(self.state.barrel_rotation, barrel_rotation * 360.0),
+                        frac * smallest_angular_difference(
+                            self.state.barrel_rotation,
+                            barrel_rotation * 360.0,
+                        ),
                     )
                 }
             };
 
             last_step_dpressure = step_dpressure;
-            self.update_states(step_ddab, step_dx, step_dy,
-                step_dpressure, step_declination, step_ascension,
-                step_dtime, viewzoom, viewrotation,
-                step_declinationx, step_declinationy, step_barrel_rotation);
+            self.update_states(
+                step_ddab,
+                step_dx,
+                step_dy,
+                step_dpressure,
+                step_declination,
+                step_ascension,
+                step_dtime,
+                viewzoom,
+                viewrotation,
+                step_declinationx,
+                step_declinationy,
+                step_barrel_rotation,
+            );
 
             // Flip between 1 and -1
             self.state.flip *= -1.0;
@@ -852,10 +978,20 @@ impl Brush {
             let step_barrel_rotation =
                 smallest_angular_difference(self.state.barrel_rotation, barrel_rotation * 360.0);
 
-            self.update_states(step_ddab, step_dx, step_dy,
-                step_dpressure, step_declination, step_ascension,
-                step_dtime, viewzoom, viewrotation,
-                step_declinationx, step_declinationy, step_barrel_rotation);
+            self.update_states(
+                step_ddab,
+                step_dx,
+                step_dy,
+                step_dpressure,
+                step_declination,
+                step_ascension,
+                step_dtime,
+                viewzoom,
+                viewrotation,
+                step_declinationx,
+                step_declinationy,
+                step_barrel_rotation,
+            );
         }
 
         // save the fraction of a dab that is already done
@@ -891,7 +1027,9 @@ impl Brush {
                     return true;
                 }
             } else {
-                if self.stroke_total_painting_time + self.stroke_current_idling_time > 0.9 + 5.0 * pressure as f64 {
+                if self.stroke_total_painting_time + self.stroke_current_idling_time
+                    > 0.9 + 5.0 * pressure as f64
+                {
                     return true;
                 }
             }
@@ -912,8 +1050,11 @@ fn update_smudge_color_fn(
     smudge_length_log: f32,
     smudge_radius_log: f32,
     smudge_op_lim: f32,
-    px: i32, py: i32, radius: f32,
-    legacy_smudge: bool, paint_factor: f32,
+    px: i32,
+    py: i32,
+    radius: f32,
+    legacy_smudge: bool,
+    paint_factor: f32,
 ) -> bool {
     // 对应 mypaint-brush.c:927-995。
     // update_factor 可能在 recentness==0 时被改为 0（首次初始化：直接用采样色）。
@@ -931,15 +1072,17 @@ fn update_smudge_color_fn(
         }
         bucket[PREV_COL_RECENTNESS] = 1.0;
 
-        let smudge_radius = (radius * smudge_radius_log.exp())
-            .clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
+        let smudge_radius =
+            (radius * smudge_radius_log.exp()).clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
 
         let (r, g, b, a) = surface.get_color(
-            px as f32, py as f32, smudge_radius,
-            if legacy_smudge { -1.0 } else { paint_factor });
+            px as f32,
+            py as f32,
+            smudge_radius,
+            if legacy_smudge { -1.0 } else { paint_factor },
+        );
 
-        if (smudge_op_lim > 0.0 && a < smudge_op_lim)
-            || (smudge_op_lim < 0.0 && a > -smudge_op_lim)
+        if (smudge_op_lim > 0.0 && a < smudge_op_lim) || (smudge_op_lim < 0.0 && a > -smudge_op_lim)
         {
             return true;
         }
@@ -957,11 +1100,24 @@ fn update_smudge_color_fn(
         bucket[SMUDGE_B] = fac_old * bucket[SMUDGE_B] + fac_new * bucket[PREV_COL_B];
         bucket[SMUDGE_A] = (fac_old * bucket[SMUDGE_A] + fac_new).clamp(0.0, 1.0);
     } else if bucket[PREV_COL_A] > WGM_EPSILON * 10.0 {
-        let prev_smudge_color = [bucket[SMUDGE_R], bucket[SMUDGE_G],
-                                 bucket[SMUDGE_B], bucket[SMUDGE_A]];
-        let sampled_color = [bucket[PREV_COL_R], bucket[PREV_COL_G],
-                             bucket[PREV_COL_B], bucket[PREV_COL_A]];
-        let mixed = mix_colors(&prev_smudge_color, &sampled_color, update_factor, paint_factor);
+        let prev_smudge_color = [
+            bucket[SMUDGE_R],
+            bucket[SMUDGE_G],
+            bucket[SMUDGE_B],
+            bucket[SMUDGE_A],
+        ];
+        let sampled_color = [
+            bucket[PREV_COL_R],
+            bucket[PREV_COL_G],
+            bucket[PREV_COL_B],
+            bucket[PREV_COL_A],
+        ];
+        let mixed = mix_colors(
+            &prev_smudge_color,
+            &sampled_color,
+            update_factor,
+            paint_factor,
+        );
         bucket[SMUDGE_R] = mixed[0];
         bucket[SMUDGE_G] = mixed[1];
         bucket[SMUDGE_B] = mixed[2];
@@ -976,8 +1132,12 @@ fn update_smudge_color_fn(
 #[inline]
 fn apply_smudge_fn(
     bucket: &[f32; SMUDGE_BUCKET_SIZE],
-    smudge_value: f32, legacy_smudge: bool, paint_factor: f32,
-    color_r: &mut f32, color_g: &mut f32, color_b: &mut f32,
+    smudge_value: f32,
+    legacy_smudge: bool,
+    paint_factor: f32,
+    color_r: &mut f32,
+    color_g: &mut f32,
+    color_b: &mut f32,
 ) -> f32 {
     let smudge_factor = 1.0f32.min(smudge_value);
     let eraser_target_alpha =
@@ -986,11 +1146,19 @@ fn apply_smudge_fn(
     if eraser_target_alpha > 0.0 {
         if legacy_smudge {
             let col_factor = 1.0 - smudge_factor;
-            *color_r = (smudge_factor * bucket[SMUDGE_R] + col_factor * *color_r) / eraser_target_alpha;
-            *color_g = (smudge_factor * bucket[SMUDGE_G] + col_factor * *color_g) / eraser_target_alpha;
-            *color_b = (smudge_factor * bucket[SMUDGE_B] + col_factor * *color_b) / eraser_target_alpha;
+            *color_r =
+                (smudge_factor * bucket[SMUDGE_R] + col_factor * *color_r) / eraser_target_alpha;
+            *color_g =
+                (smudge_factor * bucket[SMUDGE_G] + col_factor * *color_g) / eraser_target_alpha;
+            *color_b =
+                (smudge_factor * bucket[SMUDGE_B] + col_factor * *color_b) / eraser_target_alpha;
         } else {
-            let smudge_color = [bucket[SMUDGE_R], bucket[SMUDGE_G], bucket[SMUDGE_B], bucket[SMUDGE_A]];
+            let smudge_color = [
+                bucket[SMUDGE_R],
+                bucket[SMUDGE_G],
+                bucket[SMUDGE_B],
+                bucket[SMUDGE_A],
+            ];
             let brush_color = [*color_r, *color_g, *color_b, 1.0];
             let mixed = mix_colors(&smudge_color, &brush_color, smudge_factor, paint_factor);
             *color_r = mixed[0];
@@ -1004,4 +1172,3 @@ fn apply_smudge_fn(
     }
     eraser_target_alpha
 }
-

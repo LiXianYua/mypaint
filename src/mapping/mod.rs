@@ -1,4 +1,3 @@
-
 /// A mapping from inputs to output values via piecewise-linear control points.
 /// Corresponds to MyPaintMapping in mypaint-mapping.c.
 pub struct Mapping {

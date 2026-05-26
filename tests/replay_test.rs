@@ -1,8 +1,8 @@
-use std::fs;
-use libmypaint::Brush;
-use libmypaint::surface::Surface;
 use libmypaint::render::DabParams;
+use libmypaint::surface::Surface;
 use libmypaint::util::rect::Rectangles;
+use libmypaint::Brush;
+use std::fs;
 
 /// Parse an events file (timestamp x y pressure per line).
 fn load_events(path: &str) -> Vec<(f64, f32, f32, f32)> {
@@ -58,12 +58,26 @@ fn test_replay_events_smoke() {
         let dtime = if dtime <= 0.0 { 0.0001 } else { dtime };
         last_time = time;
 
-        brush.stroke_to(&mut surface, x, y, pressure,
-            0.0, 0.0, dtime, 1.0, 0.0, 0.0, false);
+        brush.stroke_to(
+            &mut surface,
+            x,
+            y,
+            pressure,
+            0.0,
+            0.0,
+            dtime,
+            1.0,
+            0.0,
+            0.0,
+            false,
+        );
     }
 
     // Just verify we got some dabs
-    assert!(!surface.calls.is_empty(), "should have drawn at least one dab");
+    assert!(
+        !surface.calls.is_empty(),
+        "should have drawn at least one dab"
+    );
 }
 
 #[test]
@@ -78,21 +92,74 @@ fn test_replay_pressure_zero_does_not_paint() {
     let mut surface = RecordingSurface { calls: Vec::new() };
 
     // First call — reset, pressure=0 (pen hover)
-    brush.stroke_to(&mut surface, 100.0, 100.0, 0.0,
-        0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
-    assert!(surface.calls.is_empty(), "first call (reset) should not produce dabs");
+    brush.stroke_to(
+        &mut surface,
+        100.0,
+        100.0,
+        0.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
+    assert!(
+        surface.calls.is_empty(),
+        "first call (reset) should not produce dabs"
+    );
 
     // Second call — still hover, no movement needed
-    brush.stroke_to(&mut surface, 100.0, 100.0, 0.0,
-        0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
-    assert!(surface.calls.is_empty(), "pressure=0 should not produce dabs");
+    brush.stroke_to(
+        &mut surface,
+        100.0,
+        100.0,
+        0.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
+    assert!(
+        surface.calls.is_empty(),
+        "pressure=0 should not produce dabs"
+    );
 
     // Third call — pressure=1 with movement (5 pixels), should paint at least 1 dab
-    brush.stroke_to(&mut surface, 105.0, 100.0, 1.0,
-        0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
-    brush.stroke_to(&mut surface, 110.0, 100.0, 1.0,
-        0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
-    assert!(!surface.calls.is_empty(), "pressure=1 with movement should produce dabs");
+    brush.stroke_to(
+        &mut surface,
+        105.0,
+        100.0,
+        1.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
+    brush.stroke_to(
+        &mut surface,
+        110.0,
+        100.0,
+        1.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
+    assert!(
+        !surface.calls.is_empty(),
+        "pressure=1 with movement should produce dabs"
+    );
 }
 
 #[test]
@@ -106,24 +173,76 @@ fn test_debug_stroke_sequence() {
     brush.set_mapping_n(BrushSetting::OpaqueMultiply, 0, 2);
     brush.set_mapping_point(BrushSetting::OpaqueMultiply, 0, 0, 0.0, 0.0);
     brush.set_mapping_point(BrushSetting::OpaqueMultiply, 0, 1, 1.0, 1.0);
-    
+
     let mut surface = RecordingSurface { calls: Vec::new() };
-    
+
     // First call - should trigger reset (pen hover)
-    let r1 = brush.stroke_to(&mut surface, 100.0, 100.0, 0.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+    let r1 = brush.stroke_to(
+        &mut surface,
+        100.0,
+        100.0,
+        0.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
     eprintln!("Call 1: reset={r1}, dabs={}", surface.calls.len());
 
     // Second call - pressure=1, move to different position (start painting)
-    let r2 = brush.stroke_to(&mut surface, 105.0, 100.0, 1.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+    let r2 = brush.stroke_to(
+        &mut surface,
+        105.0,
+        100.0,
+        1.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
     eprintln!("Call 2: reset={r2}, dabs={}", surface.calls.len());
 
     // Third call - continue painting
-    let r3 = brush.stroke_to(&mut surface, 110.0, 100.0, 1.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+    let r3 = brush.stroke_to(
+        &mut surface,
+        110.0,
+        100.0,
+        1.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
     eprintln!("Call 3: reset={r3}, dabs={}", surface.calls.len());
 
     // Fourth call - still painting, moving further
-    let r4 = brush.stroke_to(&mut surface, 115.0, 100.0, 1.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+    let r4 = brush.stroke_to(
+        &mut surface,
+        115.0,
+        100.0,
+        1.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
     eprintln!("Call 4: reset={r4}, dabs={}", surface.calls.len());
 
-    assert!(!surface.calls.is_empty(), "should have drawn dabs by call {r4}, got {} dabs", surface.calls.len());
+    assert!(
+        !surface.calls.is_empty(),
+        "should have drawn dabs by call {r4}, got {} dabs",
+        surface.calls.len()
+    );
 }

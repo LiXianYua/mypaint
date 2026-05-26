@@ -32,13 +32,17 @@ impl Default for SymmetryData {
         Self {
             state_current: SymmetryState {
                 symmetry_type: SymmetryType::Vertical,
-                center_x: 0.0, center_y: 0.0,
-                angle: 0.0, num_lines: 0.0,
+                center_x: 0.0,
+                center_y: 0.0,
+                angle: 0.0,
+                num_lines: 0.0,
             },
             state_pending: SymmetryState {
                 symmetry_type: SymmetryType::Vertical,
-                center_x: 0.0, center_y: 0.0,
-                angle: 0.0, num_lines: 0.0,
+                center_x: 0.0,
+                center_y: 0.0,
+                angle: 0.0,
+                num_lines: 0.0,
             },
             pending_changes: false,
             active: false,
@@ -48,11 +52,19 @@ impl Default for SymmetryData {
 }
 
 impl SymmetryData {
-    pub fn set_pending(&mut self, active: bool, center_x: f32, center_y: f32,
-        symmetry_angle: f32, symmetry_type: SymmetryType, rot_symmetry_lines: i32)
-    {
+    pub fn set_pending(
+        &mut self,
+        active: bool,
+        center_x: f32,
+        center_y: f32,
+        symmetry_angle: f32,
+        symmetry_type: SymmetryType,
+        rot_symmetry_lines: i32,
+    ) {
         self.state_pending = SymmetryState {
-            symmetry_type, center_x, center_y,
+            symmetry_type,
+            center_x,
+            center_y,
             angle: symmetry_angle,
             num_lines: rot_symmetry_lines as f32,
         };
@@ -61,7 +73,9 @@ impl SymmetryData {
     }
 
     pub fn update(&mut self) {
-        if !self.pending_changes { return; }
+        if !self.pending_changes {
+            return;
+        }
         self.state_current = SymmetryState {
             symmetry_type: self.state_pending.symmetry_type,
             center_x: self.state_pending.center_x,
@@ -91,8 +105,12 @@ impl SymmetryData {
                 self.symmetry_matrices = vec![
                     Transform::identity(),
                     Transform {
-                        xx: -1.0, xy: 0.0, yx: 0.0, yy: 1.0,
-                        x0: 2.0 * cx, y0: 0.0,
+                        xx: -1.0,
+                        xy: 0.0,
+                        yx: 0.0,
+                        yy: 1.0,
+                        x0: 2.0 * cx,
+                        y0: 0.0,
                     },
                 ];
             }
@@ -100,8 +118,12 @@ impl SymmetryData {
                 self.symmetry_matrices = vec![
                     Transform::identity(),
                     Transform {
-                        xx: 1.0, xy: 0.0, yx: 0.0, yy: -1.0,
-                        x0: 0.0, y0: 2.0 * cy,
+                        xx: 1.0,
+                        xy: 0.0,
+                        yx: 0.0,
+                        yy: -1.0,
+                        x0: 0.0,
+                        y0: 2.0 * cy,
                     },
                 ];
             }
@@ -109,16 +131,28 @@ impl SymmetryData {
                 self.symmetry_matrices = vec![
                     Transform::identity(),
                     Transform {
-                        xx: -1.0, xy: 0.0, yx: 0.0, yy: 1.0,
-                        x0: 2.0 * cx, y0: 0.0,
+                        xx: -1.0,
+                        xy: 0.0,
+                        yx: 0.0,
+                        yy: 1.0,
+                        x0: 2.0 * cx,
+                        y0: 0.0,
                     },
                     Transform {
-                        xx: 1.0, xy: 0.0, yx: 0.0, yy: -1.0,
-                        x0: 0.0, y0: 2.0 * cy,
+                        xx: 1.0,
+                        xy: 0.0,
+                        yx: 0.0,
+                        yy: -1.0,
+                        x0: 0.0,
+                        y0: 2.0 * cy,
                     },
                     Transform {
-                        xx: -1.0, xy: 0.0, yx: 0.0, yy: -1.0,
-                        x0: 2.0 * cx, y0: 2.0 * cy,
+                        xx: -1.0,
+                        xy: 0.0,
+                        yx: 0.0,
+                        yy: -1.0,
+                        x0: 2.0 * cx,
+                        y0: 2.0 * cy,
                     },
                 ];
             }
@@ -130,7 +164,10 @@ impl SymmetryData {
                     let c = theta.cos();
                     let s = theta.sin();
                     mats.push(Transform {
-                        xx: c, xy: -s, yx: s, yy: c,
+                        xx: c,
+                        xy: -s,
+                        yx: s,
+                        yy: c,
                         x0: cx - cx * c + cy * s,
                         y0: cy - cx * s - cy * c,
                     });
@@ -145,13 +182,19 @@ impl SymmetryData {
                     let c = theta.cos();
                     let s = theta.sin();
                     mats.push(Transform {
-                        xx: c, xy: -s, yx: s, yy: c,
+                        xx: c,
+                        xy: -s,
+                        yx: s,
+                        yy: c,
                         x0: cx - cx * c + cy * s,
                         y0: cy - cx * s - cy * c,
                     });
                     // Reflection
                     mats.push(Transform {
-                        xx: -c, xy: s, yx: s, yy: c,
+                        xx: -c,
+                        xy: s,
+                        yx: s,
+                        yy: c,
                         x0: cx + cx * c - cy * s,
                         y0: cy - cx * s - cy * c,
                     });
@@ -162,7 +205,9 @@ impl SymmetryData {
     }
 
     pub fn num_symmetry_points(&self) -> usize {
-        if !self.active { return 1; }
+        if !self.active {
+            return 1;
+        }
         self.symmetry_matrices.len().max(1)
     }
 

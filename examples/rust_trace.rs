@@ -4,10 +4,10 @@
 //!
 //! 用法: cargo run --release --example rust_trace -- <brush.myb> <events.dat>
 
-use libmypaint::Brush;
-use libmypaint::Surface;
 use libmypaint::render::DabParams;
 use libmypaint::util::rect::Rectangles;
+use libmypaint::Brush;
+use libmypaint::Surface;
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -43,7 +43,9 @@ fn fmt_g9(v: f32) -> String {
 }
 
 fn trim_trailing_zeros(s: &str) -> String {
-    if !s.contains('.') { return s.to_string(); }
+    if !s.contains('.') {
+        return s.to_string();
+    }
     let trimmed = s.trim_end_matches('0').trim_end_matches('.');
     if trimmed.is_empty() || trimmed == "-" {
         "0".to_string()
@@ -60,15 +62,28 @@ fn normalize_exponent(s: &str) -> String {
 impl Surface for TraceSurface {
     fn draw_dab(&mut self, p: &DabParams) -> bool {
         self.dab_count += 1;
-        let _ = writeln!(self.out,
+        let _ = writeln!(
+            self.out,
             "DAB {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
             self.dab_count,
-            fmt_g9(p.x), fmt_g9(p.y), fmt_g9(p.radius),
-            fmt_g9(p.color_r), fmt_g9(p.color_g), fmt_g9(p.color_b),
-            fmt_g9(p.opaque), fmt_g9(p.hardness), fmt_g9(p.softness),
-            fmt_g9(p.alpha_eraser), fmt_g9(p.aspect_ratio), fmt_g9(p.angle),
-            fmt_g9(p.lock_alpha), fmt_g9(p.colorize),
-            fmt_g9(p.posterize), fmt_g9(p.posterize_num), fmt_g9(p.paint));
+            fmt_g9(p.x),
+            fmt_g9(p.y),
+            fmt_g9(p.radius),
+            fmt_g9(p.color_r),
+            fmt_g9(p.color_g),
+            fmt_g9(p.color_b),
+            fmt_g9(p.opaque),
+            fmt_g9(p.hardness),
+            fmt_g9(p.softness),
+            fmt_g9(p.alpha_eraser),
+            fmt_g9(p.aspect_ratio),
+            fmt_g9(p.angle),
+            fmt_g9(p.lock_alpha),
+            fmt_g9(p.colorize),
+            fmt_g9(p.posterize),
+            fmt_g9(p.posterize_num),
+            fmt_g9(p.paint)
+        );
         true
     }
 
@@ -77,7 +92,9 @@ impl Surface for TraceSurface {
     }
 
     fn begin_atomic(&mut self) {}
-    fn end_atomic(&mut self) -> Rectangles { Rectangles::default() }
+    fn end_atomic(&mut self) -> Rectangles {
+        Rectangles::default()
+    }
     fn save_png(&mut self, _path: &std::path::Path, _x: i32, _y: i32, _w: i32, _h: i32) {}
 }
 
@@ -106,9 +123,13 @@ fn main() {
     let mut first = true;
     for line in events.lines() {
         let line = line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 4 { continue; }
+        if parts.len() < 4 {
+            continue;
+        }
         let t: f64 = parts[0].parse().expect("parse t");
         let x: f32 = parts[1].parse().expect("parse x");
         let y: f32 = parts[2].parse().expect("parse y");

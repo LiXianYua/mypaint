@@ -1,5 +1,5 @@
-use std::fs;
 use libmypaint::Brush;
+use std::fs;
 
 #[test]
 fn test_load_bulk_brush() {

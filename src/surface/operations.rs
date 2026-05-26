@@ -7,13 +7,22 @@ use std::collections::HashMap;
 /// 对应 OperationDataDrawDab in operationqueue.c。
 #[derive(Debug, Clone, Copy)]
 pub struct OpDrawDab {
-    pub x: f32, pub y: f32, pub radius: f32,
-    pub color_r: u16, pub color_g: u16, pub color_b: u16,
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub color_r: u16,
+    pub color_g: u16,
+    pub color_b: u16,
     pub color_a: f32, // 0..1
-    pub opaque: f32, pub hardness: f32, pub softness: f32,
-    pub aspect_ratio: f32, pub angle: f32,
-    pub lock_alpha: f32, pub colorize: f32,
-    pub posterize: f32, pub posterize_num: u16,
+    pub opaque: f32,
+    pub hardness: f32,
+    pub softness: f32,
+    pub aspect_ratio: f32,
+    pub angle: f32,
+    pub lock_alpha: f32,
+    pub colorize: f32,
+    pub posterize: f32,
+    pub posterize_num: u16,
     pub paint: f32,
     pub normal: f32, // = 1 * (1-lock_alpha) * (1-colorize) * (1-posterize)
 }
@@ -32,7 +41,9 @@ pub struct OperationQueue {
 
 impl OperationQueue {
     pub fn new() -> Self {
-        Self { queues: HashMap::new() }
+        Self {
+            queues: HashMap::new(),
+        }
     }
 
     /// 推入 op 到指定 tile 的队列。
@@ -55,10 +66,16 @@ impl OperationQueue {
         self.queues.clear();
     }
 
-    pub fn is_empty(&self) -> bool { self.queues.is_empty() }
-    pub fn len(&self) -> usize { self.queues.len() }
+    pub fn is_empty(&self) -> bool {
+        self.queues.is_empty()
+    }
+    pub fn len(&self) -> usize {
+        self.queues.len()
+    }
 }
 
 impl Default for OperationQueue {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

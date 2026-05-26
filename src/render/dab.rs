@@ -66,8 +66,14 @@ impl MaskParams {
 /// - `one_over_radius2`: 1/(radius²)
 #[inline]
 pub fn calculate_rr(
-    xp: i32, yp: i32, x: f32, y: f32, aspect_ratio: f32,
-    sn: f32, cs: f32, one_over_radius2: f32,
+    xp: i32,
+    yp: i32,
+    x: f32,
+    y: f32,
+    aspect_ratio: f32,
+    sn: f32,
+    cs: f32,
+    one_over_radius2: f32,
 ) -> f32 {
     let yy = (yp as f32) + 0.5 - y;
     let xx = (xp as f32) + 0.5 - x;
@@ -116,8 +122,14 @@ fn closest_point_to_line(lx: f32, ly: f32, px: f32, py: f32) -> (f32, f32) {
 /// 对应 mypaint-tiled-surface.c:277-354 calculate_rr_antialiased。
 #[inline]
 pub fn calculate_rr_antialiased(
-    xp: i32, yp: i32, x: f32, y: f32, aspect_ratio: f32,
-    sn: f32, cs: f32, one_over_radius2: f32,
+    xp: i32,
+    yp: i32,
+    x: f32,
+    y: f32,
+    aspect_ratio: f32,
+    sn: f32,
+    cs: f32,
+    one_over_radius2: f32,
     r_aa_start: f32,
 ) -> f32 {
     let pixel_right = x - xp as f32;
@@ -127,17 +139,16 @@ pub fn calculate_rr_antialiased(
     let pixel_left = pixel_right - 1.0;
     let pixel_top = pixel_bottom - 1.0;
 
-    let (nearest_x, nearest_y, r_near, rr_near) = if pixel_left < 0.0 && pixel_right > 0.0
-        && pixel_top < 0.0 && pixel_bottom > 0.0
-    {
-        (0.0, 0.0, 0.0, 0.0)
-    } else {
-        let (mut nx, mut ny) = closest_point_to_line(cs, sn, pixel_center_x, pixel_center_y);
-        nx = nx.clamp(pixel_left, pixel_right);
-        ny = ny.clamp(pixel_top, pixel_bottom);
-        let r = calculate_r_sample(nx, ny, aspect_ratio, sn, cs);
-        (nx, ny, r, r * one_over_radius2)
-    };
+    let (nearest_x, nearest_y, r_near, rr_near) =
+        if pixel_left < 0.0 && pixel_right > 0.0 && pixel_top < 0.0 && pixel_bottom > 0.0 {
+            (0.0, 0.0, 0.0, 0.0)
+        } else {
+            let (mut nx, mut ny) = closest_point_to_line(cs, sn, pixel_center_x, pixel_center_y);
+            nx = nx.clamp(pixel_left, pixel_right);
+            ny = ny.clamp(pixel_top, pixel_bottom);
+            let r = calculate_r_sample(nx, ny, aspect_ratio, sn, cs);
+            (nx, ny, r, r * one_over_radius2)
+        };
 
     if rr_near > 1.0 {
         return rr_near;

@@ -6,18 +6,34 @@ pub const M_PI: f32 = std::f32::consts::PI;
 #[inline]
 pub fn max3(a: f32, b: f32, c: f32) -> f32 {
     if a > b {
-        if a > c { a } else { c }
+        if a > c {
+            a
+        } else {
+            c
+        }
     } else {
-        if b > c { b } else { c }
+        if b > c {
+            b
+        } else {
+            c
+        }
     }
 }
 
 #[inline]
 pub fn min3(a: f32, b: f32, c: f32) -> f32 {
     if a < b {
-        if a < c { a } else { c }
+        if a < c {
+            a
+        } else {
+            c
+        }
     } else {
-        if b < c { b } else { c }
+        if b < c {
+            b
+        } else {
+            c
+        }
     }
 }
 

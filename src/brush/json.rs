@@ -1,9 +1,9 @@
 //! Brush JSON loading. Corresponds to mypaint-brush.c:1549-1681.
 
-use serde::Deserialize;
 use crate::brush::Brush;
-use crate::BrushSetting;
 use crate::BrushInput;
+use crate::BrushSetting;
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct BrushJson {
@@ -52,7 +52,11 @@ impl Brush {
         updated_any
     }
 
-    fn update_setting_from_json(&mut self, setting_id: BrushSetting, obj: &serde_json::Value) -> bool {
+    fn update_setting_from_json(
+        &mut self,
+        setting_id: BrushSetting,
+        obj: &serde_json::Value,
+    ) -> bool {
         let Some(obj) = obj.as_object() else {
             eprintln!("Warning: Wrong type for setting: {}", setting_id.cname());
             return false;

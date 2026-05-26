@@ -8,9 +8,7 @@
 //!
 //! Blend 函数遍历这个 buffer 来高效跳过透明区域。
 
-use crate::render::dab::{
-    calculate_rr, calculate_rr_antialiased, calculate_opa, MaskParams,
-};
+use crate::render::dab::{calculate_opa, calculate_rr, calculate_rr_antialiased, MaskParams};
 use crate::surface::tile::TILE_SIZE;
 
 const SCALE: u32 = 1 << 15;
@@ -27,7 +25,10 @@ pub struct MaskBuffer {
 
 impl MaskBuffer {
     pub fn new() -> Self {
-        Self { buf: vec![0; MASK_BUFFER_LEN], len: 0 }
+        Self {
+            buf: vec![0; MASK_BUFFER_LEN],
+            len: 0,
+        }
     }
 
     pub fn as_slice(&self) -> &[u16] {
@@ -40,16 +41,22 @@ impl MaskBuffer {
 }
 
 impl Default for MaskBuffer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// 渲染 dab mask 到 RLE buffer。x/y 是 tile-local 坐标（dab 中心相对于 tile 左上角）。
 /// 对应 render_dab_mask in mypaint-tiled-surface.c:376-493。
 pub fn render_dab_mask(
     mask_buf: &mut MaskBuffer,
-    x: f32, y: f32, radius: f32,
-    hardness: f32, softness: f32,
-    aspect_ratio: f32, angle: f32,
+    x: f32,
+    y: f32,
+    radius: f32,
+    hardness: f32,
+    softness: f32,
+    aspect_ratio: f32,
+    angle: f32,
 ) {
     let hardness = hardness.clamp(0.0, 1.0);
     debug_assert!(hardness != 0.0); // 调用方应已检查
@@ -71,7 +78,11 @@ pub fn render_dab_mask(
     // 小半径走 AA 分支
     let use_aa = radius < 3.0;
     let aa_border = 1.0_f32;
-    let mut r_aa_start = if radius > aa_border { radius - aa_border } else { 0.0 };
+    let mut r_aa_start = if radius > aa_border {
+        radius - aa_border
+    } else {
+        0.0
+    };
     r_aa_start = r_aa_start * r_aa_start / aspect_ratio;
 
     // RLE 输出（buf 的写入指针）
@@ -87,11 +98,28 @@ pub fn render_dab_mask(
         let mut xp = x0;
         while xp <= x1 {
             let rr = if use_aa {
-                calculate_rr_antialiased(xp as i32, py as i32, x, y,
-                    aspect_ratio, sn, cs, one_over_radius2, r_aa_start)
+                calculate_rr_antialiased(
+                    xp as i32,
+                    py as i32,
+                    x,
+                    y,
+                    aspect_ratio,
+                    sn,
+                    cs,
+                    one_over_radius2,
+                    r_aa_start,
+                )
             } else {
-                calculate_rr(xp as i32, py as i32, x, y,
-                    aspect_ratio, sn, cs, one_over_radius2)
+                calculate_rr(
+                    xp as i32,
+                    py as i32,
+                    x,
+                    y,
+                    aspect_ratio,
+                    sn,
+                    cs,
+                    one_over_radius2,
+                )
             };
             let opa = calculate_opa(rr, &mask_params);
             let opa_u = (opa * SCALE as f32) as u16;
@@ -100,7 +128,8 @@ pub fn render_dab_mask(
             } else {
                 if skip > 0 {
                     // 写入 0, skip*4 (C 的 mask 索引步长是 4 因为是 rgba)
-                    mask_buf.buf[write_idx] = 0; write_idx += 1;
+                    mask_buf.buf[write_idx] = 0;
+                    write_idx += 1;
                     mask_buf.buf[write_idx] = (skip * 4).min(u16::MAX as usize) as u16;
                     write_idx += 1;
                     skip = 0;
@@ -114,8 +143,10 @@ pub fn render_dab_mask(
         skip += TILE_SIZE - (x1 + 1);
     }
     // 末尾终止符 0, 0
-    mask_buf.buf[write_idx] = 0; write_idx += 1;
-    mask_buf.buf[write_idx] = 0; write_idx += 1;
+    mask_buf.buf[write_idx] = 0;
+    write_idx += 1;
+    mask_buf.buf[write_idx] = 0;
+    write_idx += 1;
     mask_buf.len = write_idx;
 }
 
@@ -141,7 +172,10 @@ mod tests {
         let slice = mb.as_slice();
         // 应该有非零的 opacity 值
         let has_nonzero = slice.iter().any(|&v| v != 0);
-        assert!(has_nonzero, "dab at tile center should produce non-zero mask values");
+        assert!(
+            has_nonzero,
+            "dab at tile center should produce non-zero mask values"
+        );
     }
 
     #[test]

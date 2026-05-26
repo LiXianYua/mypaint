@@ -49,20 +49,19 @@ fn fixed_tiled_surface_round_trip() {
 
         // 通过 vtable 接口画一个 dab
         mypaint_surface_begin_atomic(iface);
-        let drew = mypaint_surface_draw_dab(iface,
-            64.0, 64.0, 10.0,
-            1.0, 0.0, 0.0,  // 红色
-            1.0, 0.8, 0.0,  // opaque, hardness, softness
+        let drew = mypaint_surface_draw_dab(
+            iface, 64.0, 64.0, 10.0, 1.0, 0.0, 0.0, // 红色
+            1.0, 0.8, 0.0, // opaque, hardness, softness
             1.0, 1.0, 90.0, // alpha_eraser, aspect, angle
             0.0, 0.0, 0.0, 0.05, // lock_alpha, colorize, posterize, posterize_num
-            0.0); // paint
+            0.0,
+        ); // paint
         assert_eq!(drew, 1, "draw_dab should return TRUE");
         mypaint_surface_end_atomic(iface, std::ptr::null_mut());
 
         // 采样应该看到红色
         let (mut r, mut g, mut b, mut a) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        mypaint_surface_get_color(iface, 64.0, 64.0, 3.0,
-            &mut r, &mut g, &mut b, &mut a, 0.0);
+        mypaint_surface_get_color(iface, 64.0, 64.0, 3.0, &mut r, &mut g, &mut b, &mut a, 0.0);
         eprintln!("FFI get_color: r={r} g={g} b={b} a={a}");
         assert!(a > 0.01, "should have non-zero alpha after draw");
         assert!(r > g && r > b, "red should dominate");

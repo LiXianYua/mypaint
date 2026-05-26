@@ -1,9 +1,9 @@
 //! 端到端测试：用真正的 FixedTiledSurface 渲染并验证像素被写入。
 
+use libmypaint::surface::fixed::FixedTiledSurface;
 use libmypaint::Brush;
 use libmypaint::BrushSetting;
 use libmypaint::Surface;
-use libmypaint::surface::fixed::FixedTiledSurface;
 
 #[test]
 fn draw_on_tiled_surface_produces_nonzero_pixels() {
@@ -24,18 +24,48 @@ fn draw_on_tiled_surface_produces_nonzero_pixels() {
 
     // 触发 reset
     surface.begin_atomic();
-    brush.stroke_to(&mut *surface, 60.0, 60.0, 0.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+    brush.stroke_to(
+        &mut *surface,
+        60.0,
+        60.0,
+        0.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
+    );
     // 几次有压力的 stroke
     for i in 1..=20 {
         let x = 60.0 + i as f32 * 1.0;
-        brush.stroke_to(&mut *surface, x, 60.0, 1.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+        brush.stroke_to(
+            &mut *surface,
+            x,
+            60.0,
+            1.0,
+            0.0,
+            0.0,
+            0.01,
+            1.0,
+            0.0,
+            0.0,
+            false,
+        );
     }
     let _roi = surface.end_atomic();
 
     // 取一个采样点的颜色，应该是红色（或至少有 alpha）
     let (r, g, b, a) = surface.get_color(70.0, 60.0, 3.0, 0.0);
     eprintln!("sampled color at (70,60): r={r}, g={g}, b={b}, a={a}");
-    assert!(a > 0.01, "expected non-zero alpha at brush trail, got a={a}");
+    assert!(
+        a > 0.01,
+        "expected non-zero alpha at brush trail, got a={a}"
+    );
     // 红色通道应当占主导
-    assert!(r > g && r > b, "expected red dominant, got r={r}, g={g}, b={b}");
+    assert!(
+        r > g && r > b,
+        "expected red dominant, got r={r}, g={g}, b={b}"
+    );
 }

@@ -2,3 +2,5 @@
 Cargo.lock
 libmypaint-upstream/
 baseline_brushes/
+basic_paint.png
+*.png

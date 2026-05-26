@@ -32,7 +32,9 @@ fn iter_rle_mask<F: FnMut(&mut [u16], u16)>(mask: &[u16], rgba: &mut [u16], mut 
         // 处理连续非零段
         while mi < mask.len() && mask[mi] != 0 {
             let m = mask[mi];
-            if ri + 4 > rgba.len() { return; }
+            if ri + 4 > rgba.len() {
+                return;
+            }
             // SAFETY-equivalent: rgba slice 长度足够
             f(&mut rgba[ri..ri + 4], m);
             mi += 1;
@@ -53,8 +55,11 @@ fn iter_rle_mask<F: FnMut(&mut [u16], u16)>(mask: &[u16], rgba: &mut [u16], mut 
 
 /// 对应 draw_dab_pixels_BlendMode_Normal。
 pub fn blend_dab_normal(
-    mask: &[u16], rgba: &mut [u16],
-    color_r: u16, color_g: u16, color_b: u16,
+    mask: &[u16],
+    rgba: &mut [u16],
+    color_r: u16,
+    color_g: u16,
+    color_b: u16,
     opacity: u16,
 ) {
     iter_rle_mask(mask, rgba, |px, m| {
@@ -69,8 +74,11 @@ pub fn blend_dab_normal(
 
 /// 对应 draw_dab_pixels_BlendMode_LockAlpha。
 pub fn blend_dab_lock_alpha(
-    mask: &[u16], rgba: &mut [u16],
-    color_r: u16, color_g: u16, color_b: u16,
+    mask: &[u16],
+    rgba: &mut [u16],
+    color_r: u16,
+    color_g: u16,
+    color_b: u16,
     opacity: u16,
 ) {
     iter_rle_mask(mask, rgba, |px, m| {
@@ -85,8 +93,12 @@ pub fn blend_dab_lock_alpha(
 
 /// 对应 draw_dab_pixels_BlendMode_Normal_and_Eraser。
 pub fn blend_dab_normal_eraser(
-    mask: &[u16], rgba: &mut [u16],
-    color_r: u16, color_g: u16, color_b: u16, color_a: u16,
+    mask: &[u16],
+    rgba: &mut [u16],
+    color_r: u16,
+    color_g: u16,
+    color_b: u16,
+    color_a: u16,
     opacity: u16,
 ) {
     iter_rle_mask(mask, rgba, |px, m| {
@@ -103,8 +115,12 @@ pub fn blend_dab_normal_eraser(
 /// SetLum + ClipColor — brushmodes.c:199-241。
 #[inline]
 fn set_rgb16_lum_from_rgb16(
-    topr: u16, topg: u16, topb: u16,
-    botr: &mut u16, botg: &mut u16, botb: &mut u16,
+    topr: u16,
+    topg: u16,
+    topb: u16,
+    botr: &mut u16,
+    botg: &mut u16,
+    botb: &mut u16,
 ) {
     let botlum = luma_u16(*botr, *botg, *botb);
     let toplum = luma_u16(topr, topg, topb);
@@ -133,8 +149,11 @@ fn set_rgb16_lum_from_rgb16(
 
 /// 对应 draw_dab_pixels_BlendMode_Color。
 pub fn blend_dab_color(
-    mask: &[u16], rgba: &mut [u16],
-    color_r: u16, color_g: u16, color_b: u16,
+    mask: &[u16],
+    rgba: &mut [u16],
+    color_r: u16,
+    color_g: u16,
+    color_b: u16,
     opacity: u16,
 ) {
     iter_rle_mask(mask, rgba, |px, m| {
@@ -158,12 +177,11 @@ pub fn blend_dab_color(
 }
 
 /// 对应 draw_dab_pixels_BlendMode_Posterize。`opacity` 已包含 opaque/mask 调制。
-pub fn blend_dab_posterize(
-    mask: &[u16], rgba: &mut [u16],
-    opacity: u16, posterize_num: u16,
-) {
+pub fn blend_dab_posterize(mask: &[u16], rgba: &mut [u16], opacity: u16, posterize_num: u16) {
     let pn = posterize_num as f32;
-    if pn == 0.0 { return; }
+    if pn == 0.0 {
+        return;
+    }
     iter_rle_mask(mask, rgba, |px, m| {
         let r = px[0] as f32 / SCALE as f32;
         let g = px[1] as f32 / SCALE as f32;
@@ -194,8 +212,12 @@ fn spectral_blend_factor(x: f32) -> f32 {
 
 /// 对应 draw_dab_pixels_BlendMode_Normal_and_Eraser_Paint。
 pub fn blend_dab_normal_eraser_paint(
-    mask: &[u16], rgba: &mut [u16],
-    color_r: u16, color_g: u16, color_b: u16, color_a: u16,
+    mask: &[u16],
+    rgba: &mut [u16],
+    color_r: u16,
+    color_g: u16,
+    color_b: u16,
+    color_a: u16,
     opacity: u16,
     spectral_a: &[f32; 10],
 ) {
@@ -217,9 +239,14 @@ pub fn blend_dab_normal_eraser_paint(
             let spectral_b = rgb_to_spectral(
                 px[0] as f32 / px[3] as f32,
                 px[1] as f32 / px[3] as f32,
-                px[2] as f32 / px[3] as f32);
+                px[2] as f32 / px[3] as f32,
+            );
             let denom = opa_a as f32 + opa_b as f32 * px[3] as f32 / SCALE as f32;
-            let mut fac_a = if denom > 0.0 { opa_a as f32 / denom } else { 0.0 };
+            let mut fac_a = if denom > 0.0 {
+                opa_a as f32 / denom
+            } else {
+                0.0
+            };
             fac_a *= color_a as f32 / SCALE as f32;
             let fac_b = 1.0 - fac_a;
             let mut sr_arr = [0.0f32; 10];
@@ -227,9 +254,12 @@ pub fn blend_dab_normal_eraser_paint(
                 sr_arr[i] = spectral_a[i].powf(fac_a) * spectral_b[i].powf(fac_b);
             }
             let (sr, sg, sb) = spectral_to_rgb(&sr_arr);
-            rgb[0] = (additive_factor * rgb[0] as f32 + spectral_factor * sr * opa_out as f32) as u32;
-            rgb[1] = (additive_factor * rgb[1] as f32 + spectral_factor * sg * opa_out as f32) as u32;
-            rgb[2] = (additive_factor * rgb[2] as f32 + spectral_factor * sb * opa_out as f32) as u32;
+            rgb[0] =
+                (additive_factor * rgb[0] as f32 + spectral_factor * sr * opa_out as f32) as u32;
+            rgb[1] =
+                (additive_factor * rgb[1] as f32 + spectral_factor * sg * opa_out as f32) as u32;
+            rgb[2] =
+                (additive_factor * rgb[2] as f32 + spectral_factor * sb * opa_out as f32) as u32;
         }
         px[3] = opa_out as u16;
         px[0] = rgb[0] as u16;
@@ -240,20 +270,33 @@ pub fn blend_dab_normal_eraser_paint(
 
 /// 对应 draw_dab_pixels_BlendMode_Normal_Paint（color_a = SCALE 退化版）。
 pub fn blend_dab_normal_paint(
-    mask: &[u16], rgba: &mut [u16],
-    color_r: u16, color_g: u16, color_b: u16,
+    mask: &[u16],
+    rgba: &mut [u16],
+    color_r: u16,
+    color_g: u16,
+    color_b: u16,
     opacity: u16,
     spectral_a: &[f32; 10],
 ) {
     blend_dab_normal_eraser_paint(
-        mask, rgba, color_r, color_g, color_b, SCALE as u16,
-        opacity, spectral_a);
+        mask,
+        rgba,
+        color_r,
+        color_g,
+        color_b,
+        SCALE as u16,
+        opacity,
+        spectral_a,
+    );
 }
 
 /// 对应 draw_dab_pixels_BlendMode_LockAlpha_Paint。
 pub fn blend_dab_lock_alpha_paint(
-    mask: &[u16], rgba: &mut [u16],
-    color_r: u16, color_g: u16, color_b: u16,
+    mask: &[u16],
+    rgba: &mut [u16],
+    color_r: u16,
+    color_g: u16,
+    color_b: u16,
     opacity: u16,
     spectral_a: &[f32; 10],
 ) {
@@ -269,12 +312,17 @@ pub fn blend_dab_lock_alpha_paint(
             return;
         }
         let denom = opa_a as f32 + opa_b as f32 * px[3] as f32 / SCALE as f32;
-        let fac_a = if denom > 0.0 { opa_a as f32 / denom } else { 0.0 };
+        let fac_a = if denom > 0.0 {
+            opa_a as f32 / denom
+        } else {
+            0.0
+        };
         let fac_b = 1.0 - fac_a;
         let spectral_b = rgb_to_spectral(
             px[0] as f32 / px[3] as f32,
             px[1] as f32 / px[3] as f32,
-            px[2] as f32 / px[3] as f32);
+            px[2] as f32 / px[3] as f32,
+        );
         let mut sr_arr = [0.0f32; 10];
         for i in 0..10 {
             sr_arr[i] = spectral_a[i].powf(fac_a) * spectral_b[i].powf(fac_b);

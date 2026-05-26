@@ -7,19 +7,19 @@
 //! 3. `TileBackend` trait 由用户实现，提供 tile 存储后端（如 fixed buffer / 无限稀疏存储 / GPU 等）
 //! 4. `draw_dab` 把 op 推入每个触及 tile 的队列，`end_atomic` 批量处理
 
-use crate::surface::Surface;
-use crate::surface::operations::{OperationQueue, OpDrawDab, TileIndex};
 use crate::render::DabParams;
+use crate::surface::operations::{OpDrawDab, OperationQueue, TileIndex};
+use crate::surface::Surface;
 // dab geometry helpers — used by render_dab_mask（不再直接在 tile.rs 引用）
-use crate::render::mask::{render_dab_mask, MaskBuffer};
 use crate::render::blend::{
-    blend_dab_normal, blend_dab_normal_eraser,
-    blend_dab_lock_alpha, blend_dab_color, blend_dab_posterize,
-    blend_dab_normal_paint, blend_dab_normal_eraser_paint, blend_dab_lock_alpha_paint,
+    blend_dab_color, blend_dab_lock_alpha, blend_dab_lock_alpha_paint, blend_dab_normal,
+    blend_dab_normal_eraser, blend_dab_normal_eraser_paint, blend_dab_normal_paint,
+    blend_dab_posterize,
 };
-use crate::util::rect::{Rect, Rectangles};
-use crate::symmetry::SymmetryData;
+use crate::render::mask::{render_dab_mask, MaskBuffer};
 use crate::smudge::rgb_to_spectral;
+use crate::symmetry::SymmetryData;
+use crate::util::rect::{Rect, Rectangles};
 use std::path::Path;
 
 /// Tile size in pixels (`MYPAINT_TILE_SIZE`).
@@ -45,7 +45,13 @@ pub struct TileRequest {
 
 impl TileRequest {
     pub fn init(level: i32, tx: i32, ty: i32, readonly: bool) -> Self {
-        Self { tx, ty, readonly, mipmap_level: level, thread_id: -1 }
+        Self {
+            tx,
+            ty,
+            readonly,
+            mipmap_level: level,
+            thread_id: -1,
+        }
     }
 }
 
@@ -136,7 +142,9 @@ impl TiledSurface {
     fn process_tile(&mut self, tx: i32, ty: i32) {
         let tile_index = TileIndex { x: tx, y: ty };
         let mut ops = self.operation_queue.pop_all(tile_index);
-        if ops.is_empty() { return; }
+        if ops.is_empty() {
+            return;
+        }
 
         let req = TileRequest::init(0, tx, ty, false);
         let mut mask_buf = MaskBuffer::new();
@@ -156,24 +164,31 @@ impl TiledSurface {
 
 /// 对单个 tile 应用一个 dab op，先渲染 mask，再按 blend mode 逐通道混合。
 /// 对应 mypaint-tiled-surface.c:process_op。
-fn process_op(
-    rgba: &mut [u16],
-    mask_buf: &mut MaskBuffer,
-    tx: i32, ty: i32,
-    op: &OpDrawDab,
-) {
+fn process_op(rgba: &mut [u16], mask_buf: &mut MaskBuffer, tx: i32, ty: i32, op: &OpDrawDab) {
     // mask 计算（tile-local 坐标）
     let local_x = op.x - (tx * TILE_SIZE as i32) as f32;
     let local_y = op.y - (ty * TILE_SIZE as i32) as f32;
-    render_dab_mask(mask_buf, local_x, local_y, op.radius, op.hardness, op.softness,
-                    op.aspect_ratio, op.angle);
+    render_dab_mask(
+        mask_buf,
+        local_x,
+        local_y,
+        op.radius,
+        op.hardness,
+        op.softness,
+        op.aspect_ratio,
+        op.angle,
+    );
     let mask = mask_buf.as_slice();
 
     let one_scale = SCALE as f32;
 
     // Spectral 表示（仅当 paint > 0 时需要）
     let spectral_a: [f32; 10] = if op.paint > 0.0 {
-        rgb_to_spectral(op.color_r as f32 / one_scale, op.color_g as f32 / one_scale, op.color_b as f32 / one_scale)
+        rgb_to_spectral(
+            op.color_r as f32 / one_scale,
+            op.color_g as f32 / one_scale,
+            op.color_b as f32 / one_scale,
+        )
     } else {
         [0.0; 10]
     };
@@ -185,13 +200,24 @@ fn process_op(
             if op.color_a >= 1.0 {
                 blend_dab_normal(mask, rgba, op.color_r, op.color_g, op.color_b, opacity);
             } else {
-                blend_dab_normal_eraser(mask, rgba, op.color_r, op.color_g, op.color_b,
-                    (op.color_a * one_scale) as u16, opacity);
+                blend_dab_normal_eraser(
+                    mask,
+                    rgba,
+                    op.color_r,
+                    op.color_g,
+                    op.color_b,
+                    (op.color_a * one_scale) as u16,
+                    opacity,
+                );
             }
         }
         if op.lock_alpha > 0.0 && op.color_a != 0.0 {
-            let opacity = (op.lock_alpha * op.opaque * (1.0 - op.colorize) *
-                (1.0 - op.posterize) * (1.0 - op.paint) * one_scale) as u16;
+            let opacity = (op.lock_alpha
+                * op.opaque
+                * (1.0 - op.colorize)
+                * (1.0 - op.posterize)
+                * (1.0 - op.paint)
+                * one_scale) as u16;
             blend_dab_lock_alpha(mask, rgba, op.color_r, op.color_g, op.color_b, opacity);
         }
     }
@@ -201,16 +227,44 @@ fn process_op(
         if op.normal > 0.0 {
             let opacity = (op.normal * op.opaque * op.paint * one_scale) as u16;
             if op.color_a >= 1.0 {
-                blend_dab_normal_paint(mask, rgba, op.color_r, op.color_g, op.color_b, opacity, &spectral_a);
+                blend_dab_normal_paint(
+                    mask,
+                    rgba,
+                    op.color_r,
+                    op.color_g,
+                    op.color_b,
+                    opacity,
+                    &spectral_a,
+                );
             } else {
-                blend_dab_normal_eraser_paint(mask, rgba, op.color_r, op.color_g, op.color_b,
-                    (op.color_a * one_scale) as u16, opacity, &spectral_a);
+                blend_dab_normal_eraser_paint(
+                    mask,
+                    rgba,
+                    op.color_r,
+                    op.color_g,
+                    op.color_b,
+                    (op.color_a * one_scale) as u16,
+                    opacity,
+                    &spectral_a,
+                );
             }
         }
         if op.lock_alpha > 0.0 && op.color_a != 0.0 {
-            let opacity = (op.lock_alpha * op.opaque * (1.0 - op.colorize) *
-                (1.0 - op.posterize) * op.paint * one_scale) as u16;
-            blend_dab_lock_alpha_paint(mask, rgba, op.color_r, op.color_g, op.color_b, opacity, &spectral_a);
+            let opacity = (op.lock_alpha
+                * op.opaque
+                * (1.0 - op.colorize)
+                * (1.0 - op.posterize)
+                * op.paint
+                * one_scale) as u16;
+            blend_dab_lock_alpha_paint(
+                mask,
+                rgba,
+                op.color_r,
+                op.color_g,
+                op.color_b,
+                opacity,
+                &spectral_a,
+            );
         }
     }
 
@@ -231,18 +285,26 @@ impl Surface for TiledSurface {
         let hardness = params.hardness.clamp(0.0, 1.0);
         let softness = params.softness.clamp(0.0, 1.0);
         let opaque = params.opaque.clamp(0.0, 1.0);
-        if radius < 0.1 { return false; }
-        if hardness == 0.0 { return false; }
-        if softness == 1.0 { return false; }
-        if opaque == 0.0 { return false; }
+        if radius < 0.1 {
+            return false;
+        }
+        if hardness == 0.0 {
+            return false;
+        }
+        if softness == 1.0 {
+            return false;
+        }
+        if opaque == 0.0 {
+            return false;
+        }
 
         // 预计算 op
         let lock_alpha = params.lock_alpha.clamp(0.0, 1.0);
         let colorize = params.colorize.clamp(0.0, 1.0);
         let posterize = params.posterize.clamp(0.0, 1.0);
         // posterize_num: 0.01..1.28 → ROUND(*100) → 1..128
-        let posterize_num = ((params.posterize_num.clamp(0.01, 1.28) * 100.0)
-            .round() as u16).clamp(1, 128);
+        let posterize_num =
+            ((params.posterize_num.clamp(0.01, 1.28) * 100.0).round() as u16).clamp(1, 128);
         let paint = params.paint.clamp(0.0, 1.0);
 
         let mut normal = 1.0_f32;
@@ -253,15 +315,24 @@ impl Surface for TiledSurface {
         let aspect_ratio = params.aspect_ratio.max(1.0);
 
         let op = OpDrawDab {
-            x: params.x, y: params.y, radius,
+            x: params.x,
+            y: params.y,
+            radius,
             color_r: (params.color_r.clamp(0.0, 1.0) * SCALE as f32) as u16,
             color_g: (params.color_g.clamp(0.0, 1.0) * SCALE as f32) as u16,
             color_b: (params.color_b.clamp(0.0, 1.0) * SCALE as f32) as u16,
             color_a: params.alpha_eraser.clamp(0.0, 1.0),
-            opaque, hardness, softness,
-            aspect_ratio, angle: params.angle,
-            lock_alpha, colorize, posterize, posterize_num,
-            paint, normal,
+            opaque,
+            hardness,
+            softness,
+            aspect_ratio,
+            angle: params.angle,
+            lock_alpha,
+            colorize,
+            posterize,
+            posterize_num,
+            paint,
+            normal,
         };
 
         // 主 dab + symmetry pass
@@ -284,7 +355,9 @@ impl Surface for TiledSurface {
     /// 关键步骤：先 process_tile flush 待处理 ops，再用 render_dab_mask 算 mask，
     /// 用 get_color_pixels_accumulate 做加权采样（含光谱混合）。
     fn get_color(&mut self, x: f32, y: f32, radius: f32, paint: f32) -> (f32, f32, f32, f32) {
-        if radius < 0.1 { return (0.0, 0.0, 0.0, 0.0); }
+        if radius < 0.1 {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
 
         let r_fringe = radius + 1.0;
         let tx1 = Self::pixel_to_tile(x - r_fringe);
@@ -311,17 +384,27 @@ impl Surface for TiledSurface {
                 self.process_tile(tx, ty);
 
                 // 取 tile snapshot 用于读
-                let Some(tile) = self.backend.tile_snapshot(tx, ty) else { continue };
+                let Some(tile) = self.backend.tile_snapshot(tx, ty) else {
+                    continue;
+                };
 
                 let local_x = x - (tx * TILE_SIZE as i32) as f32;
                 let local_y = y - (ty * TILE_SIZE as i32) as f32;
                 // mask 计算用 hardness=0.5, softness=0.5 (与 C 一致 — 圆形 mask)
-                render_dab_mask(&mut mask_buf, local_x, local_y, radius,
-                    0.5, 0.5, 1.0, 0.0);
+                render_dab_mask(&mut mask_buf, local_x, local_y, radius, 0.5, 0.5, 1.0, 0.0);
 
-                accumulate_tile_color_rle(mask_buf.as_slice(), &tile,
-                    paint, &mut sum_weight, &mut sum_r, &mut sum_g, &mut sum_b, &mut sum_a,
-                    &mut avg_spectral, &mut avg_rgb);
+                accumulate_tile_color_rle(
+                    mask_buf.as_slice(),
+                    &tile,
+                    paint,
+                    &mut sum_weight,
+                    &mut sum_r,
+                    &mut sum_g,
+                    &mut sum_b,
+                    &mut sum_a,
+                    &mut avg_spectral,
+                    &mut avg_rgb,
+                );
             }
         }
 
@@ -386,10 +469,16 @@ impl Surface for TiledSurface {
 /// - `paint < 0`: 走 legacy 路径 — 仅累加 additive sum_r/g/b (premultiplied)。
 /// - `paint >= 0`: 同时维护 avg_spectral 和 avg_rgb，最后由调用方合并。
 fn accumulate_tile_color_rle(
-    mask: &[u16], tile: &[u16],
+    mask: &[u16],
+    tile: &[u16],
     paint: f32,
-    sum_weight: &mut f32, sum_r: &mut f32, sum_g: &mut f32, sum_b: &mut f32, sum_a: &mut f32,
-    avg_spectral: &mut [f32; 10], avg_rgb: &mut [f32; 3],
+    sum_weight: &mut f32,
+    sum_r: &mut f32,
+    sum_g: &mut f32,
+    sum_b: &mut f32,
+    sum_a: &mut f32,
+    avg_spectral: &mut [f32; 10],
+    avg_rgb: &mut [f32; 3],
 ) {
     use crate::smudge::rgb_to_spectral;
 
@@ -422,7 +511,8 @@ fn accumulate_tile_color_rle(
             let spectral = rgb_to_spectral(
                 px[0] as f32 / px[3] as f32,
                 px[1] as f32 / px[3] as f32,
-                px[2] as f32 / px[3] as f32);
+                px[2] as f32 / px[3] as f32,
+            );
             for i in 0..10 {
                 avg_spectral[i] = spectral[i].powf(fac_a) * avg_spectral[i].powf(fac_b);
             }
@@ -443,7 +533,9 @@ fn iter_rle_mask_get_color<F: FnMut(u16, &[u16; 4])>(mask: &[u16], tile: &[u16],
     let mut ri: usize = 0;
     loop {
         while mi < mask.len() && mask[mi] != 0 {
-            if ri + 4 > tile.len() { return; }
+            if ri + 4 > tile.len() {
+                return;
+            }
             let px: &[u16; 4] = (&tile[ri..ri + 4]).try_into().unwrap();
             f(mask[mi], px);
             mi += 1;

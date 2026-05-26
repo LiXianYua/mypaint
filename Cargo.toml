@@ -2,8 +2,15 @@
 name = "libmypaint"
 version = "0.1.0"
 edition = "2021"
-description = "A Rust port of libmypaint brush engine"
+description = "A Rust port of libmypaint brush engine (1:1 reproduction of the C library)"
 license = "ISC"
+readme = "README.md"
+keywords = ["graphics", "paint", "brush", "drawing", "libmypaint"]
+categories = ["graphics", "multimedia::images", "rendering"]
+authors = ["liyang"]
+repository = "https://github.com/liyang/rust_libmypaint"
+documentation = "https://docs.rs/libmypaint"
+exclude = ["libmypaint-upstream/", "tests/brushes/bad/*.bad-myb"]
 
 [features]
 default = []

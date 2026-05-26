@@ -162,7 +162,10 @@ fn main() {
     code.push_str("        match name {\n");
     for setting in &data.settings {
         let name = to_rust_ident(&setting.internal_name);
-        code.push_str(&format!("            \"{}\" => Some(BrushSetting::{name}),\n", setting.internal_name));
+        code.push_str(&format!(
+            "            \"{}\" => Some(BrushSetting::{name}),\n",
+            setting.internal_name
+        ));
     }
     code.push_str("            _ => None,\n");
     code.push_str("        }\n");
@@ -171,7 +174,10 @@ fn main() {
     code.push_str("        match self {\n");
     for setting in &data.settings {
         let name = to_rust_ident(&setting.internal_name);
-        code.push_str(&format!("            BrushSetting::{name} => \"{}\",\n", setting.internal_name));
+        code.push_str(&format!(
+            "            BrushSetting::{name} => \"{}\",\n",
+            setting.internal_name
+        ));
     }
     code.push_str("        }\n");
     code.push_str("    }\n");
@@ -183,7 +189,10 @@ fn main() {
     code.push_str("        match name {\n");
     for input in &data.inputs {
         let name = to_rust_ident(&input.id);
-        code.push_str(&format!("            \"{}\" => Some(BrushInput::{name}),\n", input.id));
+        code.push_str(&format!(
+            "            \"{}\" => Some(BrushInput::{name}),\n",
+            input.id
+        ));
     }
     code.push_str("            _ => None,\n");
     code.push_str("        }\n");
@@ -192,7 +201,10 @@ fn main() {
     code.push_str("        match self {\n");
     for input in &data.inputs {
         let name = to_rust_ident(&input.id);
-        code.push_str(&format!("            BrushInput::{name} => \"{}\",\n", input.id));
+        code.push_str(&format!(
+            "            BrushInput::{name} => \"{}\",\n",
+            input.id
+        ));
     }
     code.push_str("        }\n");
     code.push_str("    }\n");

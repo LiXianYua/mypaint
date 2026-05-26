@@ -1,20 +1,20 @@
 //! Brush engine core.
 //! Corresponds to MyPaintBrush in mypaint-brush.c.
 
-pub mod state;
 pub mod settings;
+pub mod state;
 
-pub use state::BrushState;
 pub use settings::BrushSettingData;
+pub use state::BrushState;
 
-mod stroke;
 mod json;
+mod stroke;
 
+use crate::util::rng::RngDouble;
 use crate::BrushSetting;
 use crate::NUM_INPUTS;
 use crate::NUM_SETTINGS;
 use crate::SETTING_INFO;
-use crate::util::rng::RngDouble;
 // state and settings are re-exported above
 
 /// Smudge bucket: R, G, B, A, prevR, prevG, prevB, prevA, recentness
@@ -124,34 +124,58 @@ impl Brush {
     /// 设置某个 smudge bucket 的全部状态（RGBA + prevRGBA + recentness）。
     /// 返回 true 成功，false 失败（索引越界）。
     pub fn set_smudge_bucket_state(
-        &mut self, bucket_index: usize,
-        r: f32, g: f32, b: f32, a: f32,
-        prev_r: f32, prev_g: f32, prev_b: f32, prev_a: f32,
+        &mut self,
+        bucket_index: usize,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        prev_r: f32,
+        prev_g: f32,
+        prev_b: f32,
+        prev_a: f32,
         prev_color_recentness: f32,
     ) -> bool {
-        let Some(buckets) = self.smudge_buckets.as_mut() else { return false };
-        if bucket_index >= buckets.len() { return false; }
+        let Some(buckets) = self.smudge_buckets.as_mut() else {
+            return false;
+        };
+        if bucket_index >= buckets.len() {
+            return false;
+        }
         let b_slot = &mut buckets[bucket_index];
-        b_slot[0] = r; b_slot[1] = g; b_slot[2] = b; b_slot[3] = a;
-        b_slot[4] = prev_r; b_slot[5] = prev_g; b_slot[6] = prev_b; b_slot[7] = prev_a;
+        b_slot[0] = r;
+        b_slot[1] = g;
+        b_slot[2] = b;
+        b_slot[3] = a;
+        b_slot[4] = prev_r;
+        b_slot[5] = prev_g;
+        b_slot[6] = prev_b;
+        b_slot[7] = prev_a;
         b_slot[8] = prev_color_recentness;
         true
     }
 
     /// 读取某个 smudge bucket 的状态。返回 Some 表示成功。
-    pub fn get_smudge_bucket_state(&self, bucket_index: usize)
-        -> Option<(f32, f32, f32, f32, f32, f32, f32, f32, f32)>
-    {
+    pub fn get_smudge_bucket_state(
+        &self,
+        bucket_index: usize,
+    ) -> Option<(f32, f32, f32, f32, f32, f32, f32, f32, f32)> {
         let buckets = self.smudge_buckets.as_ref()?;
-        if bucket_index >= buckets.len() { return None; }
+        if bucket_index >= buckets.len() {
+            return None;
+        }
         let b = &buckets[bucket_index];
         Some((b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]))
     }
 
     /// 已写入的最小 bucket 索引（-1 = 从未使用）。
-    pub fn min_smudge_bucket_used(&self) -> i32 { self.min_bucket_used }
+    pub fn min_smudge_bucket_used(&self) -> i32 {
+        self.min_bucket_used
+    }
     /// 已写入的最大 bucket 索引（-1 = 从未使用）。
-    pub fn max_smudge_bucket_used(&self) -> i32 { self.max_bucket_used }
+    pub fn max_smudge_bucket_used(&self) -> i32 {
+        self.max_bucket_used
+    }
 
     fn settings_base_values_have_changed(&mut self) {
         for i in 0..2 {
@@ -159,7 +183,8 @@ impl Brush {
                 self.settings[BrushSetting::Speed1Gamma as usize].base_value()
             } else {
                 self.settings[BrushSetting::Speed2Gamma as usize].base_value()
-            }).exp();
+            })
+            .exp();
             let fix1_x = 45.0;
             let fix1_y = 0.5;
             let fix2_x = 45.0;
@@ -213,8 +238,17 @@ impl Brush {
         self.settings[id as usize].mapping().get_n(input)
     }
 
-    pub fn set_mapping_point(&mut self, id: BrushSetting, input: usize, index: usize, x: f32, y: f32) {
-        self.settings[id as usize].mapping_mut().set_point(input, index, x, y);
+    pub fn set_mapping_point(
+        &mut self,
+        id: BrushSetting,
+        input: usize,
+        index: usize,
+        x: f32,
+        y: f32,
+    ) {
+        self.settings[id as usize]
+            .mapping_mut()
+            .set_point(input, index, x, y);
     }
 
     pub fn get_mapping_point(&self, id: BrushSetting, input: usize, index: usize) -> (f32, f32) {
