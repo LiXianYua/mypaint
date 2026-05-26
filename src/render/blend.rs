@@ -51,10 +51,15 @@ fn iter_rle_mask<F: FnMut(&mut [Premul15; 4], Coverage15)>(
                 if ri + 4 > rgba.len() {
                     return;
                 }
-                // SAFETY: Premul15 is #[repr(transparent)] wrapper of u16,
-                // so &mut [u16; 4] and &mut [Premul15; 4] are layout-
-                // identical and aliasing-equivalent at this point (we hold
-                // exclusive access via &mut rgba).
+                // SAFETY:
+                // - `Premul15` is `#[repr(transparent)]` over `u16` and has
+                //   no niches (it accepts any `u16` bit pattern as a value),
+                //   so the layout, alignment, and bit-pattern validity of
+                //   `[u16; 4]` and `[Premul15; 4]` are identical.
+                // - We hold exclusive access via `&mut rgba`. The view
+                //   `&mut [Premul15; 4]` borrows only `rgba[ri..ri+4]`; the
+                //   loop does not re-index `rgba` while `px` is live, and
+                //   `ri += 4` advances the cursor before the next cast.
                 let px: &mut [Premul15; 4] =
                     unsafe { &mut *(rgba[ri..ri + 4].as_mut_ptr() as *mut [Premul15; 4]) };
                 f(px, cov);

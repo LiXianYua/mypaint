@@ -204,7 +204,10 @@ pub(crate) fn process_op(
     let color_b = op.color_b;
     let color_a_premul = Premul15::from_unit_f32(op.color_a);
 
-    // 把 f32 0..=1 的 opacity 转 Coverage15。
+    // 把 f32 在 [0, 1] 的 opacity 标量转 Coverage15。所有调用方传入的
+    // 都是若干已 clamp 到 [0,1] 的 op 字段的乘积（≤ 1），所以
+    // `v * one_scale ≤ SCALE`，不会被 `as u16` 截断；`new_saturating`
+    // 在此是 defense-in-depth。
     let to_cov = |v: f32| Coverage15::new_saturating((v * one_scale) as u16);
 
     // Normal (non-paint) pass
@@ -542,8 +545,13 @@ fn iter_rle_mask_get_color<F: FnMut(Coverage15, &[Premul15; 4])>(
                 if ri + 4 > tile.len() {
                     return;
                 }
-                // SAFETY: Premul15 is #[repr(transparent)] over u16,
-                // shared borrow only — read-only view into the tile slice.
+                // SAFETY:
+                // - `Premul15` is `#[repr(transparent)]` over `u16` with no
+                //   niches, so layout/alignment/validity equivalent to
+                //   `[u16; 4]`.
+                // - Shared (`&[Premul15; 4]`) borrow only; the underlying
+                //   `tile: &[u16]` is held shared by `iter_rle_mask_get_color`,
+                //   so no aliasing conflict.
                 let px: &[Premul15; 4] =
                     unsafe { &*(tile[ri..ri + 4].as_ptr() as *const [Premul15; 4]) };
                 f(cov, px);

@@ -141,12 +141,23 @@ const _: () = assert!(Coverage15::SCALE <= u16::MAX as u32);
 
 /// 0..=`SCALE` (1<<15 = 32768) 的 premultiplied 颜色 channel 值。
 ///
-/// `tile_buffer: Vec<u16>` 里的每个 u16 都是这个类型语义；用 newtype 区分
-/// 像素 channel 和其他 u16 类型 ([`Coverage15`] / [`RleSkip`])。
+/// **Invariant:** `Premul15` 内部 u16 始终在 `0..=SCALE` 范围内。所有构造
+/// 函数都饱和到该范围；不存在能产生 OOR 值的 safe API。
 ///
-/// `#[repr(transparent)]` 保证 layout 与 u16 等价 —— `&mut [u16; 4]` 可以
-/// 通过 [`crate::render::mask`] / [`crate::surface::tile`] 内部的 unsafe
-/// cast 转 `&mut [Premul15; 4]`，零 runtime 开销。
+/// 用 newtype 区分像素 channel 和其他 u16 类型（[`Coverage15`] mask coverage /
+/// [`RleSkip`] RLE skip 长度）。type system 阻止把这三类 u16 互相误传。
+///
+/// 不实现 `From<u16>` / 算术运算符 / `Deref` —— 这会绕过范围检查或隐藏
+/// 15-bit fixed-point 乘法语义，丢失 newtype 的核心安全价值。需要做整数
+/// 运算请显式 `.raw()` 解包。
+///
+/// `#[repr(transparent)]` 保证 layout、对齐、ABI 都与 u16 等价。任何 u16
+/// 位模式都是合法 `Premul15` 字面位（无 niche），所以
+/// `&mut [u16; 4]` ↔ `&mut [Premul15; 4]` 的内部 unsafe cast 是 sound 的
+/// （仅作为类型视图，不破坏 invariant）。注意：cast 到 `Premul15` 之后，
+/// 如果原 u16 是 OOR（例如 [`crate::surface::fixed::FixedTiledSurface::new_c_compat`]
+/// 用 0xFFFF 填的 tile），值类型上合法但语义上违反 invariant；blend 路径
+/// 的写入会通过 [`Self::from_scaled_u32`] 饱和回正确范围。
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Premul15(u16);
@@ -177,15 +188,18 @@ impl Premul15 {
         Self((v.clamp(0.0, 1.0) * Self::SCALE as f32) as u16)
     }
 
-    /// blend 算法专用：从 `(a*b + c*d) / SCALE` 这种已知在 0..=SCALE
-    /// 范围的 u32 转回 `Premul15`。debug 校验范围。
+    /// blend 算法专用：从 15-bit fixed-point 算式（如 `(a*b + c*d) / SCALE`）
+    /// 转回 `Premul15`。**始终饱和**到 `0..=SCALE`，保住类型不变量。
+    ///
+    /// 不加 `debug_assert!(v <= SCALE)` 的原因：
+    /// [`crate::surface::fixed::FixedTiledSurface::new_c_compat`] 模式下，
+    /// tile buffer 被 0xFFFF 填充（C 上游的 bug 的复刻），blend 读到 OOR
+    /// 输入会让中间结果合法地超过 SCALE。Saturating 既能防住 c_compat
+    /// 的合理 OOR，也能挡住真正的算法 bug。Algorithm bugs 通过单元测试和
+    /// CI 覆盖。
     #[inline]
     pub(crate) fn from_scaled_u32(v: u32) -> Self {
-        debug_assert!(
-            v <= Self::SCALE,
-            "Premul15::from_scaled_u32: {v} > SCALE — blend overflow?"
-        );
-        Self(v as u16)
+        Self(v.min(Self::SCALE) as u16)
     }
 
     /// 取出内部 u16，用于 u32 / u16 整数运算。
@@ -433,6 +447,75 @@ mod tests {
         assert!(RleSkip::ZERO.is_zero());
         assert_eq!(RleSkip::ZERO.raw(), 0);
         assert!(!RleSkip::from_pixel_count(1).is_zero());
+    }
+
+    #[test]
+    fn premul15_new_saturating_caps_at_scale() {
+        assert_eq!(Premul15::new_saturating(0).raw(), 0);
+        assert_eq!(
+            Premul15::new_saturating(Premul15::SCALE as u16).raw(),
+            Premul15::SCALE as u16
+        );
+        assert_eq!(
+            Premul15::new_saturating(u16::MAX).raw(),
+            Premul15::SCALE as u16
+        );
+    }
+
+    #[test]
+    fn premul15_from_unit_f32_boundary() {
+        assert_eq!(Premul15::from_unit_f32(0.0).raw(), 0);
+        assert_eq!(Premul15::from_unit_f32(1.0), Premul15::FULL);
+        // 50% should land at SCALE/2 = 16384 (or 16384-1 due to floor)
+        let half = Premul15::from_unit_f32(0.5).raw();
+        assert!(
+            (16383..=16384).contains(&half),
+            "0.5 → {} not in [16383, 16384]",
+            half
+        );
+        // Out of [0,1] clamps to bounds
+        assert_eq!(Premul15::from_unit_f32(-1.0).raw(), 0);
+        assert_eq!(Premul15::from_unit_f32(2.0), Premul15::FULL);
+        // NaN clamps to NaN then `as u16` = 0
+        assert_eq!(Premul15::from_unit_f32(f32::NAN).raw(), 0);
+    }
+
+    #[test]
+    fn premul15_from_scaled_u32_saturates_in_release() {
+        // Within range: passes through
+        assert_eq!(Premul15::from_scaled_u32(0).raw(), 0);
+        assert_eq!(
+            Premul15::from_scaled_u32(Premul15::SCALE).raw(),
+            Premul15::SCALE as u16
+        );
+        // Above SCALE: must saturate (not truncate as u16) — this is the
+        // Phase 2 review fix that protects Phase 3's Vec<Premul15> contract.
+        assert_eq!(
+            Premul15::from_scaled_u32(Premul15::SCALE + 1).raw(),
+            Premul15::SCALE as u16
+        );
+        assert_eq!(
+            Premul15::from_scaled_u32(u32::MAX).raw(),
+            Premul15::SCALE as u16
+        );
+    }
+
+    #[test]
+    fn rle_entry_parse_unterminated_skip_collapses_to_end() {
+        // Skip slot without a value behind it — buffer truncated mid-skip.
+        // Should decode as End (the offset+1 guard at parse).
+        let buf = [0u16, 8]; // 0 marker, skip-len 8, no terminator after.
+        let (e, w) = RleEntry::parse(&buf, 0);
+        // The skip itself decodes because offset+1=1 < len=2 and buf[1]=8 != 0.
+        // So this becomes Skip, not End.
+        assert!(matches!(e, RleEntry::Skip(_)));
+        assert_eq!(w, 2);
+        // The truly unterminated case: trailing 0 with no follow-up.
+        let buf = [42u16, 0]; // pixel, then 0 at the very end.
+        let (_, w1) = RleEntry::parse(&buf, 0);
+        let (e2, w2) = RleEntry::parse(&buf, w1);
+        assert!(matches!(e2, RleEntry::End));
+        assert_eq!(w2, 0);
     }
 
     // ------------------------------------------------------------------------
