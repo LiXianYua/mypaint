@@ -29,6 +29,10 @@ pub struct Brush {
     /// Fallback bucket used when no buckets are configured. Mirrors how C
     /// uses STATE(SMUDGE_RA..PREV_COL_RECENTNESS) as a default bucket.
     pub(crate) inline_bucket: [f32; SMUDGE_BUCKET_SIZE],
+    /// 已写入的 bucket 索引范围（-1 = 从未写入）。对应 C mypaint_brush.c 的
+    /// min_bucket_used / max_bucket_used。
+    pub(crate) min_bucket_used: i32,
+    pub(crate) max_bucket_used: i32,
     pub(crate) rng: RngDouble,
     pub(crate) print_inputs: bool,
     pub(crate) stroke_total_painting_time: f64,
@@ -52,6 +56,13 @@ impl Brush {
     }
 
     pub fn new_with_buckets(num_smudge_buckets: usize) -> Self {
+        // 对应 mypaint-brush.c:197-207：初始 min/max = [0, n-1] 让 brush_reset
+        // 把整个 bucket 数组清零；reset 后 min/max → -1。
+        let (init_min, init_max) = if num_smudge_buckets > 0 {
+            (0_i32, (num_smudge_buckets as i32) - 1)
+        } else {
+            (-1, -1)
+        };
         let mut brush = Self {
             settings: std::array::from_fn(|_| BrushSettingData::new()),
             state: BrushState::zeroed(),
@@ -61,6 +72,8 @@ impl Brush {
                 None
             },
             inline_bucket: [0.0; SMUDGE_BUCKET_SIZE],
+            min_bucket_used: init_min,
+            max_bucket_used: init_max,
             rng: RngDouble::new(1000),
             print_inputs: false,
             stroke_total_painting_time: 0.0,
@@ -83,19 +96,62 @@ impl Brush {
     }
 
     pub(crate) fn brush_reset(&mut self) {
+        // 对应 mypaint-brush.c:144-167。
         self.skip = 0.0;
         self.skip_last_x = 0.0;
         self.skip_last_y = 0.0;
         self.skipped_dtime = 0.0;
         self.state = BrushState::zeroed();
         self.state.flip = -1.0;
+        // 只清零 [min_bucket_used, max_bucket_used] 范围内的 bucket
         if let Some(buckets) = &mut self.smudge_buckets {
-            for b in buckets.iter_mut() {
-                *b = [0.0; SMUDGE_BUCKET_SIZE];
+            if self.min_bucket_used != -1 {
+                let lo = self.min_bucket_used as usize;
+                let hi = (self.max_bucket_used as usize).min(buckets.len().saturating_sub(1));
+                for b in &mut buckets[lo..=hi] {
+                    *b = [0.0; SMUDGE_BUCKET_SIZE];
+                }
+                self.min_bucket_used = -1;
+                self.max_bucket_used = -1;
             }
         }
         self.inline_bucket = [0.0; SMUDGE_BUCKET_SIZE];
     }
+
+    // ============== Smudge bucket public state API ==============
+    // 对应 mypaint-brush.c:447-532
+
+    /// 设置某个 smudge bucket 的全部状态（RGBA + prevRGBA + recentness）。
+    /// 返回 true 成功，false 失败（索引越界）。
+    pub fn set_smudge_bucket_state(
+        &mut self, bucket_index: usize,
+        r: f32, g: f32, b: f32, a: f32,
+        prev_r: f32, prev_g: f32, prev_b: f32, prev_a: f32,
+        prev_color_recentness: f32,
+    ) -> bool {
+        let Some(buckets) = self.smudge_buckets.as_mut() else { return false };
+        if bucket_index >= buckets.len() { return false; }
+        let b_slot = &mut buckets[bucket_index];
+        b_slot[0] = r; b_slot[1] = g; b_slot[2] = b; b_slot[3] = a;
+        b_slot[4] = prev_r; b_slot[5] = prev_g; b_slot[6] = prev_b; b_slot[7] = prev_a;
+        b_slot[8] = prev_color_recentness;
+        true
+    }
+
+    /// 读取某个 smudge bucket 的状态。返回 Some 表示成功。
+    pub fn get_smudge_bucket_state(&self, bucket_index: usize)
+        -> Option<(f32, f32, f32, f32, f32, f32, f32, f32, f32)>
+    {
+        let buckets = self.smudge_buckets.as_ref()?;
+        if bucket_index >= buckets.len() { return None; }
+        let b = &buckets[bucket_index];
+        Some((b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]))
+    }
+
+    /// 已写入的最小 bucket 索引（-1 = 从未使用）。
+    pub fn min_smudge_bucket_used(&self) -> i32 { self.min_bucket_used }
+    /// 已写入的最大 bucket 索引（-1 = 从未使用）。
+    pub fn max_smudge_bucket_used(&self) -> i32 { self.max_bucket_used }
 
     fn settings_base_values_have_changed(&mut self) {
         for i in 0..2 {

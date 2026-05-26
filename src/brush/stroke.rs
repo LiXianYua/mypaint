@@ -370,11 +370,19 @@ impl Brush {
         if !has_buckets {
             return &mut self.inline_bucket;
         }
-        let buckets = self.smudge_buckets.as_mut().unwrap();
+        let buckets_len = self.smudge_buckets.as_ref().unwrap().len();
         let bucket_index = self.settings_value[BrushSetting::SmudgeBucket as usize]
             .round()
-            .clamp(0.0, buckets.len() as f32 - 1.0) as usize;
-        &mut buckets[bucket_index]
+            .clamp(0.0, buckets_len as f32 - 1.0) as usize;
+        // min/max 跟踪，对应 mypaint-brush.c:911-916
+        let bi = bucket_index as i32;
+        if self.min_bucket_used == -1 || self.min_bucket_used > bi {
+            self.min_bucket_used = bi;
+        }
+        if self.max_bucket_used < bi {
+            self.max_bucket_used = bi;
+        }
+        &mut self.smudge_buckets.as_mut().unwrap()[bucket_index]
     }
 
     fn fetch_smudge_bucket_ref(&self) -> &[f32; SMUDGE_BUCKET_SIZE] {
