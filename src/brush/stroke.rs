@@ -24,6 +24,33 @@ const ACTUAL_RADIUS_MIN: f32 = 0.2;
 const ACTUAL_RADIUS_MAX: f32 = 1000.0;
 const GRID_SIZE: f32 = 256.0;
 
+/// 一步（一个 dab 时间窗，或时间窗尾的 catch-up）的 deltas。
+///
+/// 由 `stroke_to` 在 time-discretization 循环里组装，交给
+/// [`Brush::update_states`] 推进 `BrushState`。把以前的 10 个 `step_*`
+/// 位置参数收拢成一个 `Copy` 小结构（10×f32 = 40 字节），call site 用
+/// 字段名初始化、命名后零成本。
+///
+/// `viewzoom` / `viewrotation` 不在这里 — 它们是 `stroke_to` 这一整次
+/// 调用的常量，不是单步 delta。
+#[derive(Clone, Copy, Debug, Default)]
+struct StrokeStep {
+    /// 这一步消耗的 dab 分数（0..=1）。
+    ddab: f32,
+    /// 位置 / 压力 / 时间增量。
+    dx: f32,
+    dy: f32,
+    dpressure: f32,
+    dtime: f32,
+    /// 倾角 / 偏角增量。
+    declination: f32,
+    ascension: f32,
+    declinationx: f32,
+    declinationy: f32,
+    /// 笔杆旋转增量（度，已 mod 360）。
+    barrel_rotation: f32,
+}
+
 struct Offsets {
     x: f32,
     y: f32,
@@ -128,22 +155,22 @@ impl Brush {
     // update_states_and_setting_values — mypaint-brush.c:708-904
     // =========================================================================
 
-    fn update_states(
-        &mut self,
-        step_ddab: f32,
-        step_dx: f32,
-        step_dy: f32,
-        step_dpressure: f32,
-        step_declination: f32,
-        step_ascension: f32,
-        step_dtime: f32,
-        step_viewzoom: f32,
-        step_viewrotation: f32,
-        step_declinationx: f32,
-        step_declinationy: f32,
-        step_barrel_rotation: f32,
-    ) {
-        let mut step_dtime = step_dtime;
+    fn update_states(&mut self, step: &StrokeStep, viewzoom: f32, viewrotation: f32) {
+        // Destructure step into the local names used throughout this 200+ line
+        // method body — keeps the C-translation transliteration legible.
+        let StrokeStep {
+            ddab: step_ddab,
+            dx: step_dx,
+            dy: step_dy,
+            dpressure: step_dpressure,
+            dtime: step_dtime_in,
+            declination: step_declination,
+            ascension: step_ascension,
+            declinationx: step_declinationx,
+            declinationy: step_declinationy,
+            barrel_rotation: step_barrel_rotation,
+        } = *step;
+        let mut step_dtime = step_dtime_in;
         if step_dtime < 0.0 {
             eprintln!("Time is running backwards!");
             step_dtime = 0.001;
@@ -159,8 +186,10 @@ impl Brush {
         self.state.declinationx += step_declinationx;
         self.state.declinationy += step_declinationy;
 
-        self.state.viewzoom = step_viewzoom;
-        let viewrotation = mod_arith(step_viewrotation.to_degrees() + 180.0, 360.0) - 180.0;
+        self.state.viewzoom = viewzoom;
+        // Normalize and shadow `viewrotation` to a degrees-in-(-180, 180] form;
+        // body below uses this normalized value, not the raw radians.
+        let viewrotation = mod_arith(viewrotation.to_degrees() + 180.0, 360.0) - 180.0;
         self.state.viewrotation = viewrotation;
 
         // Gridmap state update — 使用 SETTING (settings_value 来自上一步 update_states)
@@ -878,72 +907,51 @@ impl Brush {
         let mut dabs_todo = self.count_dabs(input_x, input_y, dtime as f32);
 
         while dabs_moved + dabs_todo >= 1.0 {
-            let (
-                step_ddab,
-                step_dx,
-                step_dy,
-                step_dpressure,
-                step_dtime,
-                step_declination,
-                step_ascension,
-                step_declinationx,
-                step_declinationy,
-                step_barrel_rotation,
-            ) = {
-                if dabs_moved > 0.001 {
-                    let step_ddab = 1.0 - dabs_moved;
-                    dabs_moved = 0.0;
-                    let frac = step_ddab / dabs_todo;
-                    (
-                        step_ddab,
-                        frac * (input_x - self.state.x),
-                        frac * (input_y - self.state.y),
-                        frac * (pressure - self.state.pressure),
-                        frac * dtime_left,
-                        frac * (tilt_declination - self.state.declination),
-                        frac * smallest_angular_difference(self.state.ascension, tilt_ascension),
-                        frac * (tilt_declinationx - self.state.declinationx),
-                        frac * (tilt_declinationy - self.state.declinationy),
-                        frac * smallest_angular_difference(
+            let step = if dabs_moved > 0.001 {
+                let ddab = 1.0 - dabs_moved;
+                dabs_moved = 0.0;
+                let frac = ddab / dabs_todo;
+                StrokeStep {
+                    ddab,
+                    dx: frac * (input_x - self.state.x),
+                    dy: frac * (input_y - self.state.y),
+                    dpressure: frac * (pressure - self.state.pressure),
+                    dtime: frac * dtime_left,
+                    declination: frac * (tilt_declination - self.state.declination),
+                    ascension: frac
+                        * smallest_angular_difference(self.state.ascension, tilt_ascension),
+                    declinationx: frac * (tilt_declinationx - self.state.declinationx),
+                    declinationy: frac * (tilt_declinationy - self.state.declinationy),
+                    barrel_rotation: frac
+                        * smallest_angular_difference(
                             self.state.barrel_rotation,
                             barrel_rotation * 360.0,
                         ),
-                    )
-                } else {
-                    let frac = 1.0 / dabs_todo;
-                    (
-                        1.0,
-                        frac * (input_x - self.state.x),
-                        frac * (input_y - self.state.y),
-                        frac * (pressure - self.state.pressure),
-                        frac * dtime_left,
-                        frac * (tilt_declination - self.state.declination),
-                        frac * smallest_angular_difference(self.state.ascension, tilt_ascension),
-                        frac * (tilt_declinationx - self.state.declinationx),
-                        frac * (tilt_declinationy - self.state.declinationy),
-                        frac * smallest_angular_difference(
+                }
+            } else {
+                let frac = 1.0 / dabs_todo;
+                StrokeStep {
+                    ddab: 1.0,
+                    dx: frac * (input_x - self.state.x),
+                    dy: frac * (input_y - self.state.y),
+                    dpressure: frac * (pressure - self.state.pressure),
+                    dtime: frac * dtime_left,
+                    declination: frac * (tilt_declination - self.state.declination),
+                    ascension: frac
+                        * smallest_angular_difference(self.state.ascension, tilt_ascension),
+                    declinationx: frac * (tilt_declinationx - self.state.declinationx),
+                    declinationy: frac * (tilt_declinationy - self.state.declinationy),
+                    barrel_rotation: frac
+                        * smallest_angular_difference(
                             self.state.barrel_rotation,
                             barrel_rotation * 360.0,
                         ),
-                    )
                 }
             };
 
-            last_step_dpressure = step_dpressure;
-            self.update_states(
-                step_ddab,
-                step_dx,
-                step_dy,
-                step_dpressure,
-                step_declination,
-                step_ascension,
-                step_dtime,
-                viewzoom,
-                viewrotation,
-                step_declinationx,
-                step_declinationy,
-                step_barrel_rotation,
-            );
+            last_step_dpressure = step.dpressure;
+            let step_dtime = step.dtime;
+            self.update_states(&step, viewzoom, viewrotation);
 
             // Flip between 1 and -1
             self.state.flip *= -1.0;
@@ -963,32 +971,22 @@ impl Brush {
         // Move brush to current time (no more dab will happen)
         // 对应 mypaint-brush.c:1482，使用 dabs_todo (不含 dabs_moved)
         {
-            let step_ddab = dabs_todo;
-            let step_dx = input_x - self.state.x;
-            let step_dy = input_y - self.state.y;
-            let step_dpressure = pressure - self.state.pressure;
-            let step_declination = tilt_declination - self.state.declination;
-            let step_declinationx = tilt_declinationx - self.state.declinationx;
-            let step_declinationy = tilt_declinationy - self.state.declinationy;
-            let step_ascension = smallest_angular_difference(self.state.ascension, tilt_ascension);
-            let step_dtime = dtime_left;
-            let step_barrel_rotation =
-                smallest_angular_difference(self.state.barrel_rotation, barrel_rotation * 360.0);
-
-            self.update_states(
-                step_ddab,
-                step_dx,
-                step_dy,
-                step_dpressure,
-                step_declination,
-                step_ascension,
-                step_dtime,
-                viewzoom,
-                viewrotation,
-                step_declinationx,
-                step_declinationy,
-                step_barrel_rotation,
-            );
+            let step = StrokeStep {
+                ddab: dabs_todo,
+                dx: input_x - self.state.x,
+                dy: input_y - self.state.y,
+                dpressure: pressure - self.state.pressure,
+                dtime: dtime_left,
+                declination: tilt_declination - self.state.declination,
+                ascension: smallest_angular_difference(self.state.ascension, tilt_ascension),
+                declinationx: tilt_declinationx - self.state.declinationx,
+                declinationy: tilt_declinationy - self.state.declinationy,
+                barrel_rotation: smallest_angular_difference(
+                    self.state.barrel_rotation,
+                    barrel_rotation * 360.0,
+                ),
+            };
+            self.update_states(&step, viewzoom, viewrotation);
         }
 
         // save the fraction of a dab that is already done
