@@ -36,7 +36,9 @@ impl FixedTileBackend {
     pub fn new(width: usize, height: usize) -> Self {
         let tiles_width = (width + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_height = (height + TILE_SIZE - 1) / TILE_SIZE;
-        let tile_buffer = vec![0u16; tiles_width * tiles_height * TILE_BUFFER_LEN];
+        // 对应 mypaint-fixed-tiled-surface.c:126 `memset(buffer, 255, buffer_size)`：
+        // 每个 byte = 0xFF → 每个 u16 = 0xFFFF = 65535（注意超过 SCALE=32768）
+        let tile_buffer = vec![0xFFFFu16; tiles_width * tiles_height * TILE_BUFFER_LEN];
         let null_tile = vec![0u16; TILE_BUFFER_LEN];
         Self {
             width,
