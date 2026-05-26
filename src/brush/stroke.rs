@@ -255,7 +255,8 @@ impl Brush {
         inputs[BrushInput::BarrelRotation as usize] = mod_arith(self.state.barrel_rotation, 360.0);
 
         // Calculate all setting values from mappings
-        for i in 0..NUM_INPUTS {
+        // 对应 mypaint-brush.c:818-820 — 遍历全部 SETTINGS，不是 INPUTS！
+        for i in 0..crate::NUM_SETTINGS {
             self.settings_value[i] = self.settings[i].mapping().calculate(&inputs);
         }
 
