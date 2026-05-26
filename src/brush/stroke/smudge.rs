@@ -13,39 +13,43 @@ use crate::util::helpers::WGM_EPSILON;
 use crate::BrushSetting;
 
 impl Brush {
+    /// 根据 SmudgeBucket setting 计算当前 step 应该读写的桶索引。
+    /// 返回 `None` 表示无桶配置（caller 应回退到 inline_bucket）。
+    /// 不变更状态。
+    fn smudge_bucket_index(&self) -> Option<usize> {
+        let buckets = self.smudge_buckets.as_ref()?;
+        if buckets.is_empty() {
+            return None;
+        }
+        let idx = self.settings_value[BrushSetting::SmudgeBucket as usize]
+            .round()
+            .clamp(0.0, buckets.len() as f32 - 1.0) as usize;
+        Some(idx)
+    }
+
     /// 取当前 stroke step 应该读写的 smudge bucket（可变）。
     /// 无桶配置时回退到 inline_bucket（等价于 C 的 STATE(SMUDGE_RA) 默认行为）。
-    /// 对应 mypaint-brush.c:906-918。
+    /// 对应 mypaint-brush.c:906-918，附带 min/max 跟踪。
     fn fetch_smudge_bucket_mut(&mut self) -> &mut SmudgeBucket {
-        let has_buckets = self.smudge_buckets.as_ref().is_some_and(|b| !b.is_empty());
-        if !has_buckets {
+        let Some(idx) = self.smudge_bucket_index() else {
             return &mut self.inline_bucket;
-        }
-        let buckets_len = self.smudge_buckets.as_ref().unwrap().len();
-        let bucket_index = self.settings_value[BrushSetting::SmudgeBucket as usize]
-            .round()
-            .clamp(0.0, buckets_len as f32 - 1.0) as usize;
+        };
         // min/max 跟踪，对应 mypaint-brush.c:911-916
-        let bi = bucket_index as i32;
+        let bi = idx as i32;
         if self.min_bucket_used == -1 || self.min_bucket_used > bi {
             self.min_bucket_used = bi;
         }
         if self.max_bucket_used < bi {
             self.max_bucket_used = bi;
         }
-        &mut self.smudge_buckets.as_mut().unwrap()[bucket_index]
+        &mut self.smudge_buckets.as_mut().unwrap()[idx]
     }
 
     fn fetch_smudge_bucket_ref(&self) -> &SmudgeBucket {
-        let has_buckets = self.smudge_buckets.as_ref().is_some_and(|b| !b.is_empty());
-        if !has_buckets {
+        let Some(idx) = self.smudge_bucket_index() else {
             return &self.inline_bucket;
-        }
-        let buckets = self.smudge_buckets.as_ref().unwrap();
-        let bucket_index = self.settings_value[BrushSetting::SmudgeBucket as usize]
-            .round()
-            .clamp(0.0, buckets.len() as f32 - 1.0) as usize;
-        &buckets[bucket_index]
+        };
+        &self.smudge_buckets.as_ref().unwrap()[idx]
     }
 
     /// 对应 mypaint-brush.c:920-997 `update_smudge_color`。

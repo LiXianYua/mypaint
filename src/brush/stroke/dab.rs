@@ -46,9 +46,9 @@ impl Brush {
         let base_radius = baseval(self, BrushSetting::RadiusLogarithmic).exp();
 
         // Directional offsets
-        let offs = self.directional_offsets(base_radius, self.state.flip as i32);
-        x += offs.x;
-        y += offs.y;
+        let (offset_x, offset_y) = self.directional_offsets(base_radius, self.state.flip as i32);
+        x += offset_x;
+        y += offset_y;
 
         let view_zoom = self.state.viewzoom;
         let offset_by_speed = self.settings_value[BrushSetting::OffsetBySpeed as usize];

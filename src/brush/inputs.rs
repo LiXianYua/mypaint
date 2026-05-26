@@ -70,3 +70,26 @@ impl Default for StrokeInputs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 锁定 `StrokeInputs::default()` 各字段当前值。
+    /// 改默认会被 caller 间接观察到（很多 `..Default::default()`
+    /// 用法），所以默认值变化必须是有意的并且要更新本测试。
+    #[test]
+    fn default_values_locked() {
+        let d = StrokeInputs::default();
+        assert_eq!(d.x, 0.0);
+        assert_eq!(d.y, 0.0);
+        assert_eq!(d.pressure, 0.0);
+        assert_eq!(d.xtilt, 0.0);
+        assert_eq!(d.ytilt, 0.0);
+        assert_eq!(d.dtime, 0.0);
+        assert_eq!(d.viewzoom, 1.0); // 关键：避免下游除零
+        assert_eq!(d.viewrotation, 0.0);
+        assert_eq!(d.barrel_rotation, 0.0);
+        assert!(!d.linear);
+    }
+}

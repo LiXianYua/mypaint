@@ -1,8 +1,8 @@
 //! Brush stroke 引擎：把 input event (x/y/pressure/tilt/dtime) 序列转成 dab。
 //!
 //! mod.rs 本身只保留 stroke entry point ([`Brush::stroke_to`]) + `exp_decay`
-//! helper + crate-private 共享类型（[`StrokeStep`] / [`StrokeContext`] /
-//! [`PaintDabsResult`] / [`Offsets`]）与常量。其余按职责拆到子模块：
+//! free helper + crate-private 共享类型（[`StrokeStep`] / [`StrokeContext`] /
+//! [`PaintDabsResult`]）与常量。其余按职责拆到子模块：
 //!
 //! - [`dab`] — dab 生成与时间离散化循环。
 //!   对应 mypaint-brush.c 的 prepare_and_draw_dab (L1042-1250) +
@@ -86,11 +86,6 @@ struct StrokeStep {
     barrel_rotation: f32,
 }
 
-struct Offsets {
-    x: f32,
-    y: f32,
-}
-
 /// Macro-like helper: setting base value (对应 C 的 BASEVAL 宏)。
 #[inline]
 fn baseval(brush: &Brush, id: BrushSetting) -> f32 {
@@ -103,19 +98,17 @@ fn setting(brush: &Brush, id: BrushSetting) -> f32 {
     brush.settings_value[id as usize]
 }
 
-impl Brush {
-    // =========================================================================
-    // exp_decay helper — mypaint-brush.c:534-544
-    // =========================================================================
-
-    #[inline]
-    pub(super) fn exp_decay(t_const: f32, t: f32) -> f32 {
-        if t_const <= 0.001 {
-            return 0.0;
-        }
-        (-t / t_const).exp()
+/// 指数衰减 helper — mypaint-brush.c:534-544。`t_const = 0` 时返回 0
+/// （等价 "瞬时跟随，无 smoothing"）。
+#[inline]
+pub(super) fn exp_decay(t_const: f32, t: f32) -> f32 {
+    if t_const <= 0.001 {
+        return 0.0;
     }
+    (-t / t_const).exp()
+}
 
+impl Brush {
     // =========================================================================
     // mypaint_brush_stroke_to — mypaint-brush.c:1300-1547
     // =========================================================================
@@ -235,7 +228,7 @@ impl Brush {
 
         // slow_tracking fac — 仅修改局部 filtered_x/y，不写 state.x/state.y
         let fac = 1.0
-            - Self::exp_decay(
+            - exp_decay(
                 baseval(self, BrushSetting::SlowTracking),
                 100.0 * dtime as f32,
             );

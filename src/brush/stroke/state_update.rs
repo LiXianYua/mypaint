@@ -5,9 +5,7 @@
 //! - update_states_and_setting_values (L708-904)
 //! - print_inputs (L667-699，调试输出)
 
-use super::{
-    baseval, setting, Offsets, StrokeStep, ACTUAL_RADIUS_MAX, ACTUAL_RADIUS_MIN, GRID_SIZE,
-};
+use super::{baseval, setting, StrokeStep, ACTUAL_RADIUS_MAX, ACTUAL_RADIUS_MIN, GRID_SIZE};
 use crate::brush::Brush;
 use crate::util::helpers::{mod_arith, smallest_angular_difference};
 use crate::{BrushInput, BrushSetting, NUM_INPUTS};
@@ -18,10 +16,10 @@ impl Brush {
     // 全部使用 SETTING（settings_value），不是 BASEVAL
     // =========================================================================
 
-    pub(super) fn directional_offsets(&self, base_radius: f32, brush_flip: i32) -> Offsets {
+    pub(super) fn directional_offsets(&self, base_radius: f32, brush_flip: i32) -> (f32, f32) {
         let offset_mult = setting(self, BrushSetting::OffsetMultiplier).exp();
         if !offset_mult.is_finite() {
-            return Offsets { x: 0.0, y: 0.0 };
+            return (0.0, 0.0);
         }
 
         let mut dx = setting(self, BrushSetting::OffsetX);
@@ -89,10 +87,10 @@ impl Brush {
 
         let lim = 3240.0;
         let base_mul = base_radius * offset_mult;
-        Offsets {
-            x: (dx * base_mul).clamp(-lim, lim),
-            y: (dy * base_mul).clamp(-lim, lim),
-        }
+        (
+            (dx * base_mul).clamp(-lim, lim),
+            (dy * base_mul).clamp(-lim, lim),
+        )
     }
 
     // =========================================================================
@@ -263,7 +261,7 @@ impl Brush {
         // slow position tracking per dab
         {
             let fac = 1.0
-                - Self::exp_decay(
+                - super::exp_decay(
                     self.settings_value[BrushSetting::SlowTrackingPerDab as usize],
                     step_ddab,
                 );
@@ -274,13 +272,13 @@ impl Brush {
         // slow speed
         {
             let fac1 = 1.0
-                - Self::exp_decay(
+                - super::exp_decay(
                     self.settings_value[BrushSetting::Speed1Slowness as usize],
                     step_dtime,
                 );
             self.state.norm_speed1_slow += (norm_speed - self.state.norm_speed1_slow) * fac1;
             let fac2 = 1.0
-                - Self::exp_decay(
+                - super::exp_decay(
                     self.settings_value[BrushSetting::Speed2Slowness as usize],
                     step_dtime,
                 );
@@ -295,7 +293,7 @@ impl Brush {
             if time_constant < 0.002 {
                 time_constant = 0.002;
             }
-            let fac = 1.0 - Self::exp_decay(time_constant, step_dtime);
+            let fac = 1.0 - super::exp_decay(time_constant, step_dtime);
             self.state.norm_dx_slow += (norm_dx - self.state.norm_dx_slow) * fac;
             self.state.norm_dy_slow += (norm_dy - self.state.norm_dy_slow) * fac;
         }
@@ -306,7 +304,7 @@ impl Brush {
             let mut dy = step_dy * self.state.viewzoom;
             let step_in_dabtime = (dx * dx + dy * dy).sqrt();
             let fac = 1.0
-                - Self::exp_decay(
+                - super::exp_decay(
                     (self.settings_value[BrushSetting::DirectionFilter as usize] * 0.5).exp() - 1.0,
                     step_in_dabtime,
                 );
@@ -332,7 +330,7 @@ impl Brush {
         // custom input
         {
             let fac = 1.0
-                - Self::exp_decay(
+                - super::exp_decay(
                     self.settings_value[BrushSetting::CustomInputSlowness as usize],
                     0.1,
                 );
