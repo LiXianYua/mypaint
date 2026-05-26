@@ -12,6 +12,10 @@ repository = "https://github.com/liyang/rust_libmypaint"
 documentation = "https://docs.rs/libmypaint"
 exclude = ["libmypaint-upstream/", "tests/brushes/bad/*.bad-myb"]
 
+[lib]
+# rlib：让 Rust 使用者用；cdylib：让 C 客户端 dlopen / 链接 .so
+crate-type = ["rlib", "cdylib"]
+
 [features]
 default = []
 ffi = ["dep:libc"]
