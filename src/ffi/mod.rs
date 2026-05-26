@@ -497,16 +497,18 @@ pub unsafe extern "C" fn mypaint_brush_stroke_to(
     let mut adapter = CSurfaceAdapter { c_surface: surface };
     let result = handle(self_).stroke_to(
         &mut adapter,
-        x,
-        y,
-        pressure,
-        xtilt,
-        ytilt,
-        dtime,
-        viewzoom,
-        viewrotation,
-        barrel_rotation,
-        linear != 0,
+        &crate::brush::StrokeInputs {
+            x,
+            y,
+            pressure,
+            xtilt,
+            ytilt,
+            dtime,
+            viewzoom,
+            viewrotation,
+            barrel_rotation,
+            linear: linear != 0,
+        },
     );
     if result {
         1
@@ -564,15 +566,17 @@ pub unsafe extern "C" fn mypaint_brush_set_smudge_bucket_state(
     }
     match handle(self_).set_smudge_bucket_state(
         bucket_index as usize,
-        r,
-        g,
-        b,
-        a,
-        prev_r,
-        prev_g,
-        prev_b,
-        prev_a,
-        prev_color_recentness,
+        crate::brush::SmudgeBucket::from_array([
+            r,
+            g,
+            b,
+            a,
+            prev_r,
+            prev_g,
+            prev_b,
+            prev_a,
+            prev_color_recentness,
+        ]),
     ) {
         Ok(()) => 1,
         Err(e) => {
@@ -601,33 +605,34 @@ pub unsafe extern "C" fn mypaint_brush_get_smudge_bucket_state(
     }
     let brush = &(*self_).inner;
     match brush.get_smudge_bucket_state(bucket_index as usize) {
-        Some((rv, gv, bv, av, prv, pgv, pbv, pav, pcrv)) => {
+        Some(bucket) => {
+            let arr = bucket.to_array();
             if !r.is_null() {
-                *r = rv;
+                *r = arr[0];
             }
             if !g.is_null() {
-                *g = gv;
+                *g = arr[1];
             }
             if !b.is_null() {
-                *b = bv;
+                *b = arr[2];
             }
             if !a.is_null() {
-                *a = av;
+                *a = arr[3];
             }
             if !prev_r.is_null() {
-                *prev_r = prv;
+                *prev_r = arr[4];
             }
             if !prev_g.is_null() {
-                *prev_g = pgv;
+                *prev_g = arr[5];
             }
             if !prev_b.is_null() {
-                *prev_b = pbv;
+                *prev_b = arr[6];
             }
             if !prev_a.is_null() {
-                *prev_a = pav;
+                *prev_a = arr[7];
             }
             if !prev_color_recentness.is_null() {
-                *prev_color_recentness = pcrv;
+                *prev_color_recentness = arr[8];
             }
             1
         }

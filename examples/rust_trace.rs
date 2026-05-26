@@ -140,7 +140,16 @@ fn main() {
         first = false;
         prev_t = t;
 
-        brush.stroke_to(&mut surface, x, y, p, 0.0, 0.0, dt, 1.0, 0.0, 0.0, false);
+        brush.stroke_to(
+            &mut surface,
+            &mypaint::StrokeInputs {
+                x,
+                y,
+                pressure: p,
+                dtime: dt,
+                ..Default::default()
+            },
+        );
     }
 
     let count = surface.dab_count;

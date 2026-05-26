@@ -2,10 +2,12 @@
 //! Corresponds to MyPaintBrush in mypaint-brush.c.
 
 pub mod error;
+pub mod inputs;
 pub mod settings;
 pub mod state;
 
 pub use error::{BrushError, BrushParseError};
+pub use inputs::StrokeInputs;
 pub use settings::BrushSettingData;
 pub use state::BrushState;
 
@@ -13,7 +15,7 @@ mod json;
 mod smudge_bucket;
 mod stroke;
 
-pub(crate) use smudge_bucket::SmudgeBucket;
+pub use smudge_bucket::SmudgeBucket;
 
 use crate::util::rng::RngDouble;
 use crate::BrushSetting;
@@ -138,19 +140,10 @@ impl Brush {
     ///   Use [`Brush::new_with_buckets`] to enable them.
     /// - [`BrushError::SmudgeBucketIndexOutOfRange`] if `bucket_index` is
     ///   greater than or equal to the number of allocated buckets.
-    #[allow(clippy::too_many_arguments)]
     pub fn set_smudge_bucket_state(
         &mut self,
         bucket_index: usize,
-        r: f32,
-        g: f32,
-        b: f32,
-        a: f32,
-        prev_r: f32,
-        prev_g: f32,
-        prev_b: f32,
-        prev_a: f32,
-        prev_color_recentness: f32,
+        state: SmudgeBucket,
     ) -> Result<(), BrushError> {
         let buckets = self
             .smudge_buckets
@@ -162,31 +155,15 @@ impl Brush {
                 len: buckets.len(),
             });
         }
-        buckets[bucket_index] = SmudgeBucket::from_array([
-            r,
-            g,
-            b,
-            a,
-            prev_r,
-            prev_g,
-            prev_b,
-            prev_a,
-            prev_color_recentness,
-        ]);
+        buckets[bucket_index] = state;
         Ok(())
     }
 
-    /// 读取某个 smudge bucket 的状态。返回 Some 表示成功。
-    pub fn get_smudge_bucket_state(
-        &self,
-        bucket_index: usize,
-    ) -> Option<(f32, f32, f32, f32, f32, f32, f32, f32, f32)> {
+    /// 读取某个 smudge bucket 的状态。`None` 表示 brush 未配置 bucket
+    /// 或索引越界。
+    pub fn get_smudge_bucket_state(&self, bucket_index: usize) -> Option<SmudgeBucket> {
         let buckets = self.smudge_buckets.as_ref()?;
-        if bucket_index >= buckets.len() {
-            return None;
-        }
-        let a = buckets[bucket_index].to_array();
-        Some((a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8]))
+        buckets.get(bucket_index).copied()
     }
 
     /// 已写入的最小 bucket 索引（-1 = 从未使用）。

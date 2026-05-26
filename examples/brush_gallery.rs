@@ -17,16 +17,12 @@ fn draw_curve(brush: &mut Brush, surface: &mut FixedTiledSurface, y_offset: f32,
     // reset stroke
     brush.stroke_to(
         &mut **surface,
-        50.0,
-        y_offset,
-        0.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 50.0,
+            y: y_offset,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
 
     let steps = 300;
@@ -39,16 +35,13 @@ fn draw_curve(brush: &mut Brush, surface: &mut FixedTiledSurface, y_offset: f32,
         let pressure = 0.2 + (t * std::f32::consts::PI).sin() * 0.8;
         brush.stroke_to(
             &mut **surface,
-            x,
-            y,
-            pressure,
-            0.0,
-            0.0,
-            dt,
-            1.0,
-            0.0,
-            0.0,
-            false,
+            &mypaint::StrokeInputs {
+                x,
+                y,
+                pressure,
+                dtime: dt,
+                ..Default::default()
+            },
         );
     }
 }

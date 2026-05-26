@@ -17,5 +17,5 @@ pub mod util;
 pub mod ffi;
 
 // Re-exports
-pub use brush::{Brush, BrushError, BrushParseError};
+pub use brush::{Brush, BrushError, BrushParseError, SmudgeBucket, StrokeInputs};
 pub use surface::Surface;

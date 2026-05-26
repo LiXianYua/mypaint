@@ -83,16 +83,13 @@ fn main() {
         }
         brush.stroke_to(
             &mut *surface,
-            s.x,
-            s.y,
-            s.pressure,
-            0.0,
-            0.0,
-            s.dtime,
-            1.0,
-            0.0,
-            0.0,
-            false,
+            &mypaint::StrokeInputs {
+                x: s.x,
+                y: s.y,
+                pressure: s.pressure,
+                dtime: s.dtime,
+                ..Default::default()
+            },
         );
     }
 

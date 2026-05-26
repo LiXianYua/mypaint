@@ -25,22 +25,28 @@ fn parallel_matches_serial() {
     let stroke = |brush: &mut Brush, surf: &mut FixedTiledSurface| {
         brush.stroke_to(
             &mut **surf,
-            10.0,
-            10.0,
-            0.0,
-            0.0,
-            0.0,
-            0.01,
-            1.0,
-            0.0,
-            0.0,
-            false,
+            &mypaint::StrokeInputs {
+                x: 10.0,
+                y: 10.0,
+                pressure: 0.0,
+                dtime: 0.01,
+                ..Default::default()
+            },
         );
         // 在多个 tile 上画一条线
         for i in 1..=80 {
             let x = 10.0 + i as f32 * 2.5;
             let y = 10.0 + i as f32 * 2.0;
-            brush.stroke_to(&mut **surf, x, y, 1.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+            brush.stroke_to(
+                &mut **surf,
+                &mypaint::StrokeInputs {
+                    x: x,
+                    y: y,
+                    pressure: 1.0,
+                    dtime: 0.01,
+                    ..Default::default()
+                },
+            );
         }
     };
 

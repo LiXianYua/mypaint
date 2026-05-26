@@ -23,7 +23,7 @@ alpha_eraser/color）bit-exact 完全相同，剩余字段仅有亚像素浮点�
 ## Quick Start
 
 ```rust
-use mypaint::{Brush, Surface, BrushSetting};
+use mypaint::{Brush, BrushSetting, StrokeInputs, Surface};
 use mypaint::surface::fixed::FixedTiledSurface;
 
 let mut brush = Brush::new();
@@ -37,13 +37,17 @@ let mut surface = FixedTiledSurface::new(256, 256);
 
 surface.begin_atomic();
 // 初始 reset stroke
-brush.stroke_to(&mut *surface, 100.0, 100.0, 0.0,
-    0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+brush.stroke_to(&mut *surface, &StrokeInputs {
+    x: 100.0, y: 100.0, dtime: 0.01,
+    ..Default::default()
+});
 // 画 stroke
 for i in 0..30 {
     let x = 100.0 + i as f32 * 1.5;
-    brush.stroke_to(&mut *surface, x, 100.0, 1.0,
-        0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false);
+    brush.stroke_to(&mut *surface, &StrokeInputs {
+        x, y: 100.0, pressure: 1.0, dtime: 0.01,
+        ..Default::default()
+    });
 }
 let roi = surface.end_atomic();
 

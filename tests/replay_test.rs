@@ -60,16 +60,13 @@ fn test_replay_events_smoke() {
 
         brush.stroke_to(
             &mut surface,
-            x,
-            y,
-            pressure,
-            0.0,
-            0.0,
-            dtime,
-            1.0,
-            0.0,
-            0.0,
-            false,
+            &mypaint::StrokeInputs {
+                x: x,
+                y: y,
+                pressure: pressure,
+                dtime: dtime,
+                ..Default::default()
+            },
         );
     }
 
@@ -169,16 +166,13 @@ fn test_replay_pressure_zero_does_not_paint() {
     // First call — reset, pressure=0 (pen hover)
     brush.stroke_to(
         &mut surface,
-        100.0,
-        100.0,
-        0.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 100.0,
+            y: 100.0,
+            pressure: 0.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     assert!(
         surface.calls.is_empty(),
@@ -188,16 +182,13 @@ fn test_replay_pressure_zero_does_not_paint() {
     // Second call — still hover, no movement needed
     brush.stroke_to(
         &mut surface,
-        100.0,
-        100.0,
-        0.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 100.0,
+            y: 100.0,
+            pressure: 0.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     assert!(
         surface.calls.is_empty(),
@@ -207,29 +198,23 @@ fn test_replay_pressure_zero_does_not_paint() {
     // Third call — pressure=1 with movement (5 pixels), should paint at least 1 dab
     brush.stroke_to(
         &mut surface,
-        105.0,
-        100.0,
-        1.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 105.0,
+            y: 100.0,
+            pressure: 1.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     brush.stroke_to(
         &mut surface,
-        110.0,
-        100.0,
-        1.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 110.0,
+            y: 100.0,
+            pressure: 1.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     assert!(
         !surface.calls.is_empty(),
@@ -254,64 +239,52 @@ fn test_debug_stroke_sequence() {
     // First call - should trigger reset (pen hover)
     let r1 = brush.stroke_to(
         &mut surface,
-        100.0,
-        100.0,
-        0.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 100.0,
+            y: 100.0,
+            pressure: 0.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     eprintln!("Call 1: reset={r1}, dabs={}", surface.calls.len());
 
     // Second call - pressure=1, move to different position (start painting)
     let r2 = brush.stroke_to(
         &mut surface,
-        105.0,
-        100.0,
-        1.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 105.0,
+            y: 100.0,
+            pressure: 1.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     eprintln!("Call 2: reset={r2}, dabs={}", surface.calls.len());
 
     // Third call - continue painting
     let r3 = brush.stroke_to(
         &mut surface,
-        110.0,
-        100.0,
-        1.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 110.0,
+            y: 100.0,
+            pressure: 1.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     eprintln!("Call 3: reset={r3}, dabs={}", surface.calls.len());
 
     // Fourth call - still painting, moving further
     let r4 = brush.stroke_to(
         &mut surface,
-        115.0,
-        100.0,
-        1.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 115.0,
+            y: 100.0,
+            pressure: 1.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     eprintln!("Call 4: reset={r4}, dabs={}", surface.calls.len());
 

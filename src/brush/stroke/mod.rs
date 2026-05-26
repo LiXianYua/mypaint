@@ -19,7 +19,7 @@ mod dab;
 mod smudge;
 mod state_update;
 
-use crate::brush::Brush;
+use crate::brush::{Brush, StrokeInputs};
 use crate::surface::Surface;
 use crate::util::helpers::rand_gauss;
 use crate::BrushSetting;
@@ -120,23 +120,25 @@ impl Brush {
     // mypaint_brush_stroke_to — mypaint-brush.c:1300-1547
     // =========================================================================
 
-    /// Main stroke entry point.
-    /// Corresponds to `mypaint_brush_stroke_to` (L1300-1547).
-    /// Returns true if the stroke is finished or should be split.
-    pub fn stroke_to(
-        &mut self,
-        surface: &mut dyn Surface,
-        x: f32,
-        y: f32,
-        pressure: f32,
-        xtilt: f32,
-        ytilt: f32,
-        dtime: f64,
-        viewzoom: f32,
-        viewrotation: f32,
-        barrel_rotation: f32,
-        linear: bool,
-    ) -> bool {
+    /// Main stroke entry point. 给定 brush state + 一组输入，推进画一段 stroke。
+    ///
+    /// 对应 mypaint-brush.c:1300-1547 `mypaint_brush_stroke_to`。
+    /// 返回 true 表示 stroke 结束应该 split (用于多 stroke 分段录制)。
+    ///
+    /// 参数用 [`StrokeInputs`] 结构体打包以便字段名初始化和 `Default` 缺省。
+    pub fn stroke_to(&mut self, surface: &mut dyn Surface, inputs: &StrokeInputs) -> bool {
+        let StrokeInputs {
+            x,
+            y,
+            pressure,
+            xtilt,
+            ytilt,
+            dtime,
+            viewzoom,
+            viewrotation,
+            barrel_rotation,
+            linear,
+        } = *inputs;
         let max_dtime = 5.0;
         let mut dtime = dtime;
 
@@ -178,16 +180,18 @@ impl Brush {
         if dtime > 0.1 && pressure != 0.0 && self.state.pressure == 0.0 {
             self.stroke_to(
                 surface,
-                x,
-                y,
-                0.0,
-                90.0,
-                0.0,
-                dtime - 0.0001,
-                viewzoom,
-                viewrotation,
-                0.0,
-                linear,
+                &StrokeInputs {
+                    x,
+                    y,
+                    pressure: 0.0,
+                    xtilt: 90.0,
+                    ytilt: 0.0,
+                    dtime: dtime - 0.0001,
+                    viewzoom,
+                    viewrotation,
+                    barrel_rotation: 0.0,
+                    linear,
+                },
             );
             dtime = 0.0001;
         }

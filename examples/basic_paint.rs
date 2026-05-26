@@ -29,16 +29,12 @@ fn main() {
     // 第一次调用 — reset 路径
     brush.stroke_to(
         &mut *surface,
-        20.0,
-        100.0,
-        0.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 20.0,
+            y: 100.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
 
     // 沿 sin 曲线移动
@@ -51,16 +47,13 @@ fn main() {
         let pressure = 0.3 + (t * std::f32::consts::PI).sin() * 0.7;
         brush.stroke_to(
             &mut *surface,
-            x,
-            y,
-            pressure,
-            0.0,
-            0.0,
-            dt,
-            1.0,
-            0.0,
-            0.0,
-            false,
+            &mypaint::StrokeInputs {
+                x,
+                y,
+                pressure,
+                dtime: dt,
+                ..Default::default()
+            },
         );
     }
 

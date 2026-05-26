@@ -13,7 +13,7 @@
 /// `SMUDGE_R/G/B/A, PREV_COL_R/G/B/A, PREV_COL_RECENTNESS` order:
 /// `to_array()[0..4]` is `smudge`, `[4..8]` is `prev`, `[8]` is `recentness`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct SmudgeBucket {
+pub struct SmudgeBucket {
     /// Current smudge color (RGBA, 0..=1).
     pub smudge: [f32; 4],
     /// Previously sampled surface color (RGBA, 0..=1).
@@ -23,7 +23,7 @@ pub(crate) struct SmudgeBucket {
 }
 
 impl SmudgeBucket {
-    pub(crate) const fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self {
             smudge: [0.0; 4],
             prev: [0.0; 4],
@@ -33,7 +33,7 @@ impl SmudgeBucket {
 
     /// Build from the 9-float FFI layout
     /// `[smudge_r, smudge_g, smudge_b, smudge_a, prev_r, prev_g, prev_b, prev_a, recentness]`.
-    pub(crate) const fn from_array(a: [f32; 9]) -> Self {
+    pub const fn from_array(a: [f32; 9]) -> Self {
         Self {
             smudge: [a[0], a[1], a[2], a[3]],
             prev: [a[4], a[5], a[6], a[7]],
@@ -42,7 +42,7 @@ impl SmudgeBucket {
     }
 
     /// Inverse of [`Self::from_array`].
-    pub(crate) const fn to_array(&self) -> [f32; 9] {
+    pub const fn to_array(&self) -> [f32; 9] {
         [
             self.smudge[0],
             self.smudge[1],

@@ -26,32 +26,26 @@ fn draw_on_tiled_surface_produces_nonzero_pixels() {
     surface.begin_atomic();
     brush.stroke_to(
         &mut *surface,
-        60.0,
-        60.0,
-        0.0,
-        0.0,
-        0.0,
-        0.01,
-        1.0,
-        0.0,
-        0.0,
-        false,
+        &mypaint::StrokeInputs {
+            x: 60.0,
+            y: 60.0,
+            pressure: 0.0,
+            dtime: 0.01,
+            ..Default::default()
+        },
     );
     // 几次有压力的 stroke
     for i in 1..=20 {
         let x = 60.0 + i as f32 * 1.0;
         brush.stroke_to(
             &mut *surface,
-            x,
-            60.0,
-            1.0,
-            0.0,
-            0.0,
-            0.01,
-            1.0,
-            0.0,
-            0.0,
-            false,
+            &mypaint::StrokeInputs {
+                x: x,
+                y: 60.0,
+                pressure: 1.0,
+                dtime: 0.01,
+                ..Default::default()
+            },
         );
     }
     let _roi = surface.end_atomic();
