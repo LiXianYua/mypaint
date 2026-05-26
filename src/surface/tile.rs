@@ -479,7 +479,6 @@ fn accumulate_tile_color_rle(
     avg_spectral: &mut Spectral,
     avg_rgb: &mut [f32; 3],
 ) {
-
     if paint < 0.0 {
         // Legacy: 纯加权累加 premultiplied RGBA
         // 对应 brushmodes.c:get_color_pixels_legacy (L491-532)
