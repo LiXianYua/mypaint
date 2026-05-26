@@ -552,7 +552,7 @@ fn iter_rle_mask_get_color<F: FnMut(Coverage15, &[u16; 4])>(mask: &[u16], tile: 
             return;
         }
         let skip = RleSkip::from_raw(mask[mi + 1]);
-        ri += skip.as_usize();
+        ri += skip.as_rgba_offset();
         mi += 2;
     }
 }

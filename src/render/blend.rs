@@ -47,7 +47,7 @@ fn iter_rle_mask<F: FnMut(&mut [u16], Coverage15)>(mask: &[u16], rgba: &mut [u16
             return; // 终止符
         }
         let skip = RleSkip::from_raw(mask[mi + 1]);
-        ri += skip.as_usize();
+        ri += skip.as_rgba_offset();
         mi += 2;
     }
 }

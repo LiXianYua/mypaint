@@ -47,10 +47,18 @@ impl Coverage15 {
         }
     }
 
-    /// 从 raw u16 构造（不做范围检查）。仅供从 [`MaskBuffer`] 这样
-    /// 已知合法的 buffer 中读取时使用。
+    /// 从 raw u16 构造（不做范围检查）。
+    ///
+    /// **仅供 crate 内部**从 [`MaskBuffer`] 这样已知合法的 RLE buffer
+    /// 中读取时使用。外部代码请用 [`Self::new_saturating`]。
+    /// debug build 会校验 `v <= SCALE`；release build 信任 caller。
     #[inline]
-    pub const fn from_raw(v: u16) -> Self {
+    pub(crate) fn from_raw(v: u16) -> Self {
+        debug_assert!(
+            (v as u32) <= Self::SCALE,
+            "Coverage15::from_raw: {v} > SCALE ({}) — buffer corruption?",
+            Self::SCALE
+        );
         Self(v)
     }
 
@@ -77,6 +85,9 @@ impl Coverage15 {
 pub struct RleSkip(u16);
 
 impl RleSkip {
+    /// 长度为 0 的 skip。
+    pub const ZERO: Self = Self(0);
+
     /// 从像素数构造（内部乘 4 并饱和到 u16::MAX）。
     #[inline]
     pub const fn from_pixel_count(px: usize) -> Self {
@@ -88,10 +99,12 @@ impl RleSkip {
         }
     }
 
-    /// 从已经 `*4` 过的 raw u16 构造（不做检查）。仅供从 [`MaskBuffer`]
-    /// 这样已知合法的 buffer 中读取时使用。
+    /// 从已经 `*4` 过的 raw u16 构造（不做检查）。
+    ///
+    /// **仅供 crate 内部**从 [`MaskBuffer`] 这样已知合法的 RLE buffer
+    /// 中读取时使用。外部代码请用 [`Self::from_pixel_count`]。
     #[inline]
-    pub const fn from_raw(v: u16) -> Self {
+    pub(crate) const fn from_raw(v: u16) -> Self {
         Self(v)
     }
 
@@ -101,12 +114,26 @@ impl RleSkip {
         self.0
     }
 
-    /// 用作 rgba slice 偏移（同 raw）。
+    /// 用作 RGBA slice 的 u16 偏移量（**已经包含 *4 步长**，不要再乘）。
     #[inline]
-    pub const fn as_usize(self) -> usize {
+    pub const fn as_rgba_offset(self) -> usize {
         self.0 as usize
     }
+
+    /// 还原回逻辑像素数（向下取整 / 4，丢弃饱和时丢失的精度）。
+    #[inline]
+    pub const fn pixel_count(self) -> usize {
+        self.0 as usize / 4
+    }
+
+    #[inline]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
 }
+
+// 编译期常量校验：Coverage15::SCALE 必须能装进 u16 字段。
+const _: () = assert!(Coverage15::SCALE <= u16::MAX as u32);
 
 const SCALE: u32 = Coverage15::SCALE;
 
@@ -280,14 +307,30 @@ mod tests {
     fn rle_skip_from_pixel_count_multiplies_by_4() {
         assert_eq!(RleSkip::from_pixel_count(0).raw(), 0);
         assert_eq!(RleSkip::from_pixel_count(7).raw(), 28);
-        assert_eq!(RleSkip::from_pixel_count(7).as_usize(), 28);
+        assert_eq!(RleSkip::from_pixel_count(7).as_rgba_offset(), 28);
     }
 
     #[test]
     fn rle_skip_saturates_at_u16_max() {
+        // 16383 * 4 = 65532, last value that fits in u16.
+        assert_eq!(RleSkip::from_pixel_count(16383).raw(), 65532);
         // 16384 * 4 = 65536 > u16::MAX, should saturate.
         assert_eq!(RleSkip::from_pixel_count(16384).raw(), u16::MAX);
         assert_eq!(RleSkip::from_pixel_count(usize::MAX).raw(), u16::MAX);
+    }
+
+    #[test]
+    fn rle_skip_pixel_count_roundtrip() {
+        let s = RleSkip::from_pixel_count(13);
+        assert_eq!(s.pixel_count(), 13);
+        assert_eq!(s.as_rgba_offset(), 52);
+    }
+
+    #[test]
+    fn rle_skip_zero_and_is_zero() {
+        assert!(RleSkip::ZERO.is_zero());
+        assert_eq!(RleSkip::ZERO.raw(), 0);
+        assert!(!RleSkip::from_pixel_count(1).is_zero());
     }
 
     // ------------------------------------------------------------------------
