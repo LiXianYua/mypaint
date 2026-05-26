@@ -33,12 +33,31 @@ unsafe impl Send for TileSlot {}
 unsafe impl Sync for TileSlot {}
 
 impl FixedTileBackend {
+    /// 创建一个固定大小画布的 backend。
+    ///
+    /// # 与 C 上游的差异
+    /// C 上游 `mypaint-fixed-tiled-surface.c:126` 使用 `memset(buffer, 255, buffer_size)`，
+    /// 即每个 u16 = `0xFFFF` = 65535。**注意这超过了合法像素范围 0..=SCALE (32768)，
+    /// 在 blend 公式中会产生溢出导致"空心"渲染**。这是 C 上游的边缘 case bug
+    /// （正常使用场景中，MyPaint 应用先 alpha-blend layer 像素覆盖 tile，
+    /// 这个非法初始值永远看不到）。
+    ///
+    /// 本实现选择透明黑 `0u16` 作为初始值，确保 blend 公式数学正确。
+    /// 如需 100% bit-exact 匹配 C 上游（包括其 bug），使用 [`Self::new_c_compat`]。
     pub fn new(width: usize, height: usize) -> Self {
+        Self::new_with_fill(width, height, 0u16)
+    }
+
+    /// C 上游 bit-exact 兼容模式：用 `0xFFFF` 初始化 tile buffer。
+    /// 仅用于复刻验证或与 C 上游行为完全等价的场景；普通用途请用 [`Self::new`]。
+    pub fn new_c_compat(width: usize, height: usize) -> Self {
+        Self::new_with_fill(width, height, 0xFFFFu16)
+    }
+
+    fn new_with_fill(width: usize, height: usize, fill: u16) -> Self {
         let tiles_width = (width + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_height = (height + TILE_SIZE - 1) / TILE_SIZE;
-        // 对应 mypaint-fixed-tiled-surface.c:126 `memset(buffer, 255, buffer_size)`：
-        // 每个 byte = 0xFF → 每个 u16 = 0xFFFF = 65535（注意超过 SCALE=32768）
-        let tile_buffer = vec![0xFFFFu16; tiles_width * tiles_height * TILE_BUFFER_LEN];
+        let tile_buffer = vec![fill; tiles_width * tiles_height * TILE_BUFFER_LEN];
         let null_tile = vec![0u16; TILE_BUFFER_LEN];
         Self {
             width,
@@ -171,8 +190,20 @@ pub struct FixedTiledSurface {
 }
 
 impl FixedTiledSurface {
+    /// 创建一个固定大小的画布。背景初始为透明黑 (0)。
     pub fn new(width: usize, height: usize) -> Self {
         let backend = Box::new(FixedTileBackend::new(width, height));
+        Self {
+            inner: TiledSurface::with_backend(backend),
+            width,
+            height,
+        }
+    }
+
+    /// C 上游 bit-exact 兼容模式。背景初始为 0xFFFF（与 C 的 memset 255 一致），
+    /// 见 [`FixedTileBackend::new_c_compat`] 的详细说明。
+    pub fn new_c_compat(width: usize, height: usize) -> Self {
+        let backend = Box::new(FixedTileBackend::new_c_compat(width, height));
         Self {
             inner: TiledSurface::with_backend(backend),
             width,

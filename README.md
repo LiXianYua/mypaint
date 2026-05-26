@@ -113,6 +113,14 @@ diff rust_trace.txt c_trace.txt
 - **`build.rs`** — 从 `brushsettings.json` 生成 `BrushSetting`/`BrushInput`/
   `BrushState` enum + info 表
 
+## 与 C 上游的有意差异
+
+| 项目 | C 上游 | 本实现 | 原因 |
+|------|--------|--------|------|
+| `FixedTiledSurface` 初始填充 | `0xFFFF` (memset 255) | `0u16` (透明黑) | C 上游用了非法像素值（超过 SCALE=32768），blend 公式会溢出导致"空心"渲染。MyPaint 应用层不踩这个 bug 是因为载入时 layer 像素会 alpha-blend 覆盖整个 tile。需要 bit-exact 复刻时用 `FixedTiledSurface::new_c_compat()`。|
+
+非随机笔刷在 `new_c_compat` 模式下 100% 像素与 C 上游一致；高随机笔刷（impressionism 等）因为浮点累积有 ~5% 局部漂移。
+
 ## 致谢
 
 C 上游 libmypaint 由 Martin Renold、Jon Nordby 及 MyPaint 团队开发。本 crate
