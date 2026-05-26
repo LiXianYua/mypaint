@@ -130,6 +130,14 @@ impl Brush {
     // 对应 mypaint-brush.c:447-532
 
     /// 设置某个 smudge bucket 的全部状态（RGBA + prevRGBA + recentness）。
+    ///
+    /// # Errors
+    ///
+    /// - [`BrushError::SmudgeBucketsNotAllocated`] if this brush was
+    ///   constructed without smudge buckets (e.g. via [`Brush::new`]).
+    ///   Use [`Brush::new_with_buckets`] to enable them.
+    /// - [`BrushError::SmudgeBucketIndexOutOfRange`] if `bucket_index` is
+    ///   greater than or equal to the number of allocated buckets.
     #[allow(clippy::too_many_arguments)]
     pub fn set_smudge_bucket_state(
         &mut self,

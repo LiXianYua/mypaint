@@ -1,5 +1,12 @@
-use mypaint::Brush;
+//! Tests for `Brush::from_string` covering each `BrushParseError` variant
+//! plus the happy paths.
+
+use mypaint::{Brush, BrushParseError};
 use std::fs;
+
+// ============================================================================
+// Happy paths — real .myb fixtures
+// ============================================================================
 
 #[test]
 fn test_load_bulk_brush() {
@@ -28,51 +35,127 @@ fn test_load_impressionism_brush() {
         .expect("impressionism.myb should load successfully");
 }
 
+// ============================================================================
+// Error variants — `MissingField`
+// ============================================================================
+
 #[test]
-fn test_load_missing_version_fails() {
+fn test_load_missing_version_fails_with_missing_field() {
+    // Fixture is now clean JSON (no trailing comma), so the only failure
+    // mode is the absent `version` key. Strict assert to lock that in.
     let json = fs::read_to_string("tests/brushes/bad/missing_version.bad-myb").unwrap();
     let mut brush = Brush::new();
-    let err = brush
-        .from_string(&json)
-        .expect_err("missing_version should fail to load");
-    // The bad-myb file is also malformed JSON (trailing comma), so either
-    // `InvalidJson` or `MissingField("version")` is acceptable — both
-    // correctly reject the file.
+    let err = brush.from_string(&json).expect_err("should fail");
+    assert!(
+        matches!(err, BrushParseError::MissingField("version")),
+        "expected MissingField(\"version\"), got {err:?}"
+    );
+}
+
+#[test]
+fn test_load_missing_settings_fails_with_missing_field() {
+    let json = fs::read_to_string("tests/brushes/bad/missing_settings.bad-myb").unwrap();
+    let mut brush = Brush::new();
+    let err = brush.from_string(&json).expect_err("should fail");
+    assert!(
+        matches!(err, BrushParseError::MissingField("settings")),
+        "expected MissingField(\"settings\"), got {err:?}"
+    );
+}
+
+// ============================================================================
+// Error variants — `InvalidJson`
+// ============================================================================
+
+#[test]
+fn test_load_empty_fails_with_invalid_json() {
+    let json = fs::read_to_string("tests/brushes/bad/empty.bad-myb").unwrap();
+    let mut brush = Brush::new();
+    let err = brush.from_string(&json).expect_err("should fail");
+    assert!(
+        matches!(err, BrushParseError::InvalidJson(_)),
+        "expected InvalidJson, got {err:?}"
+    );
+}
+
+#[test]
+fn test_load_truncated_fails_with_invalid_json() {
+    let json = fs::read_to_string("tests/brushes/bad/truncated.bad-myb").unwrap();
+    let mut brush = Brush::new();
+    let err = brush.from_string(&json).expect_err("should fail");
+    assert!(
+        matches!(err, BrushParseError::InvalidJson(_)),
+        "expected InvalidJson, got {err:?}"
+    );
+}
+
+// ============================================================================
+// Error variants — `UnsupportedVersion`
+// ============================================================================
+
+#[test]
+fn test_load_version_2_fails() {
+    let json = r#"{"version": 2, "settings": {}}"#;
+    let mut brush = Brush::new();
+    let err = brush.from_string(json).expect_err("should fail");
+    assert!(
+        matches!(err, BrushParseError::UnsupportedVersion(2)),
+        "expected UnsupportedVersion(2), got {err:?}"
+    );
+}
+
+#[test]
+fn test_load_version_99_fails() {
+    let json = r#"{"version": 99, "settings": {}}"#;
+    let mut brush = Brush::new();
+    let err = brush.from_string(json).expect_err("should fail");
+    assert!(
+        matches!(err, BrushParseError::UnsupportedVersion(99)),
+        "expected UnsupportedVersion(99), got {err:?}"
+    );
+}
+
+// ============================================================================
+// Error variants — `WrongFieldType`
+// ============================================================================
+
+#[test]
+fn test_load_settings_array_fails_with_wrong_type() {
+    let json = r#"{"version": 3, "settings": []}"#;
+    let mut brush = Brush::new();
+    let err = brush.from_string(json).expect_err("should fail");
     assert!(
         matches!(
             err,
-            mypaint::BrushParseError::MissingField("version")
-                | mypaint::BrushParseError::InvalidJson(_)
+            BrushParseError::WrongFieldType {
+                field: "settings",
+                expected: "object"
+            }
         ),
-        "expected MissingField(\"version\") or InvalidJson, got {err:?}"
+        "expected WrongFieldType {{ field: \"settings\", expected: \"object\" }}, got {err:?}"
     );
 }
 
-#[test]
-fn test_load_empty_fails() {
-    let json = fs::read_to_string("tests/brushes/bad/empty.bad-myb").unwrap();
-    let mut brush = Brush::new();
-    let err = brush
-        .from_string(&json)
-        .expect_err("empty brush should fail to load");
-    assert!(
-        matches!(err, mypaint::BrushParseError::InvalidJson(_)),
-        "expected InvalidJson, got {err:?}"
-    );
-}
+// ============================================================================
+// Deliberate divergence from C upstream — empty settings is OK
+// ============================================================================
 
 #[test]
-fn test_load_truncated_fails() {
-    let json = fs::read_to_string("tests/brushes/bad/truncated.bad-myb").unwrap();
+fn test_load_empty_settings_succeeds() {
+    // C `libmypaint` returns FALSE when no setting was updated (conflates
+    // "no settings to apply" with "every setting failed"). Rust treats
+    // only structural errors as failures, so an empty `settings: {}` is
+    // a valid (if useless) brush. Lock this divergence in with a test.
+    let json = r#"{"version": 3, "settings": {}}"#;
     let mut brush = Brush::new();
-    let err = brush
-        .from_string(&json)
-        .expect_err("truncated brush should fail to load");
-    assert!(
-        matches!(err, mypaint::BrushParseError::InvalidJson(_)),
-        "expected InvalidJson, got {err:?}"
-    );
+    brush
+        .from_string(json)
+        .expect("empty settings should succeed");
 }
+
+// ============================================================================
+// Defaults sanity
+// ============================================================================
 
 #[test]
 fn test_brush_from_defaults() {

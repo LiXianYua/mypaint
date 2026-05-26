@@ -8,11 +8,26 @@ impl Brush {
     /// Load brush settings from a JSON string.
     /// Corresponds to `mypaint_brush_from_string`.
     ///
-    /// Unknown setting/input names are tolerated (a warning is printed to
-    /// stderr and the entry is skipped), matching upstream `libmypaint`'s
-    /// "best-effort" behavior. Returns an error only for hard failures:
-    /// malformed JSON, missing `version`/`settings`, wrong types, or
-    /// unsupported brush version.
+    /// # Behavior
+    ///
+    /// - Returns `Ok(())` once the document parses and `version` + `settings`
+    ///   are present and well-typed, **even if `settings` is `{}`** (empty
+    ///   object). This is a deliberate divergence from C `libmypaint`, which
+    ///   returns FALSE when no setting was successfully updated; the C
+    ///   behavior conflates "no settings to apply" with "every setting
+    ///   failed". The Rust version treats only structural failures as errors.
+    /// - Unknown setting/input names are tolerated: a warning is printed to
+    ///   stderr and the entry is skipped (matching C `libmypaint`'s
+    ///   forward-compatible behavior for `.myb` files written by newer
+    ///   MyPaint versions).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrushParseError`] for structural failures:
+    /// - malformed JSON ([`BrushParseError::InvalidJson`])
+    /// - missing `version` or `settings` field ([`BrushParseError::MissingField`])
+    /// - `version` ≠ 3 ([`BrushParseError::UnsupportedVersion`])
+    /// - `settings` is not a JSON object ([`BrushParseError::WrongFieldType`])
     pub fn from_string(&mut self, string: &str) -> Result<(), BrushParseError> {
         let json: serde_json::Value = serde_json::from_str(string)?;
 
@@ -44,14 +59,10 @@ impl Brush {
         Ok(())
     }
 
-    fn update_setting_from_json(
-        &mut self,
-        setting_id: BrushSetting,
-        obj: &serde_json::Value,
-    ) -> bool {
+    fn update_setting_from_json(&mut self, setting_id: BrushSetting, obj: &serde_json::Value) {
         let Some(obj) = obj.as_object() else {
             eprintln!("Warning: Wrong type for setting: {}", setting_id.cname());
-            return false;
+            return;
         };
 
         // Base value
@@ -59,7 +70,7 @@ impl Brush {
             self.set_base_value(setting_id, base_value as f32);
         } else {
             eprintln!("Warning: No 'base_value' for: {}", setting_id.cname());
-            return false;
+            return;
         }
 
         // Inputs
@@ -84,6 +95,5 @@ impl Brush {
                 }
             }
         }
-        true
     }
 }

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors returned by [`crate::Brush::from_string`].
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum BrushParseError {
     /// The input was not valid JSON.
     #[error("invalid brush JSON: {0}")]
@@ -27,6 +28,7 @@ pub enum BrushParseError {
 
 /// Runtime errors for brush state mutations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum BrushError {
     /// Smudge buckets have not been allocated (the brush was created
     /// without smudge bucket capacity, e.g. via [`crate::Brush::new`]).

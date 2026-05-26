@@ -302,6 +302,12 @@ pub unsafe extern "C" fn mypaint_brush_from_defaults(self_: *mut MyPaintBrush) {
     handle(self_).from_defaults();
 }
 
+/// Load brush settings from a JSON string. C ABI shim for
+/// [`crate::Brush::from_string`].
+///
+/// Returns `1` on success, `0` on error. On error, the underlying
+/// [`crate::BrushParseError`] is printed to stderr (matching C `libmypaint`'s
+/// error reporting style).
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_from_string(
     self_: *mut MyPaintBrush,
@@ -534,6 +540,11 @@ pub unsafe extern "C" fn mypaint_init() {
 // Smudge bucket state APIs — 对应 mypaint-brush.c:455-532
 // ============================================================================
 
+/// Set a smudge bucket's full state. C ABI shim for
+/// [`crate::Brush::set_smudge_bucket_state`].
+///
+/// Returns `1` on success, `0` on error. On error, the underlying
+/// [`crate::BrushError`] is printed to stderr.
 #[no_mangle]
 pub unsafe extern "C" fn mypaint_brush_set_smudge_bucket_state(
     self_: *mut MyPaintBrush,
@@ -564,7 +575,10 @@ pub unsafe extern "C" fn mypaint_brush_set_smudge_bucket_state(
         prev_color_recentness,
     ) {
         Ok(()) => 1,
-        Err(_) => 0,
+        Err(e) => {
+            eprintln!("mypaint_brush_set_smudge_bucket_state: {e}");
+            0
+        }
     }
 }
 
