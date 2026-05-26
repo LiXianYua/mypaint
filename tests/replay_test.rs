@@ -1,7 +1,7 @@
-use libmypaint::render::DabParams;
-use libmypaint::surface::Surface;
-use libmypaint::util::rect::Rectangles;
-use libmypaint::Brush;
+use mypaint::render::DabParams;
+use mypaint::surface::Surface;
+use mypaint::util::rect::Rectangles;
+use mypaint::Brush;
 use std::fs;
 
 /// Parse an events file (timestamp x y pressure per line).
@@ -84,7 +84,7 @@ fn test_replay_events_smoke() {
 fn test_replay_pressure_zero_does_not_paint() {
     let mut brush = Brush::new();
     brush.from_defaults();
-    use libmypaint::BrushSetting;
+    use mypaint::BrushSetting;
     brush.set_base_value(BrushSetting::RadiusLogarithmic, 2.0);
     brush.set_base_value(BrushSetting::Opaque, 1.0);
     brush.set_base_value(BrushSetting::Hardness, 0.8);
@@ -166,7 +166,7 @@ fn test_replay_pressure_zero_does_not_paint() {
 fn test_debug_stroke_sequence() {
     let mut brush = Brush::new();
     brush.from_defaults();
-    use libmypaint::BrushSetting;
+    use mypaint::BrushSetting;
     brush.set_base_value(BrushSetting::RadiusLogarithmic, 2.0);
     brush.set_base_value(BrushSetting::Opaque, 1.0);
     brush.set_base_value(BrushSetting::Hardness, 0.8);

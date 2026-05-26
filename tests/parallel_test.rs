@@ -3,10 +3,10 @@
 
 #![cfg(feature = "parallel")]
 
-use libmypaint::surface::fixed::FixedTiledSurface;
-use libmypaint::Brush;
-use libmypaint::BrushSetting;
-use libmypaint::Surface;
+use mypaint::surface::fixed::FixedTiledSurface;
+use mypaint::Brush;
+use mypaint::BrushSetting;
+use mypaint::Surface;
 
 /// 跑同一组 stroke：一次用串行 end_atomic、一次用 end_atomic_parallel，
 /// 比较采样点 RGBA 应当一致。

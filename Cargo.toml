@@ -1,5 +1,5 @@
 [package]
-name = "libmypaint"
+name = "mypaint"
 version = "0.1.0"
 edition = "2021"
 description = "A Rust port of libmypaint brush engine (1:1 reproduction of the C library)"

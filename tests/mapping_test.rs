@@ -1,4 +1,4 @@
-use libmypaint::mapping::Mapping;
+use mypaint::mapping::Mapping;
 
 #[test]
 fn test_mapping_constant_returns_base_value() {

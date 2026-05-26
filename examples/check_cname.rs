@@ -1,5 +1,5 @@
 fn main() {
-    use libmypaint::BrushSetting;
+    use mypaint::BrushSetting;
     let s = BrushSetting::from_cname("elliptical_dab_ratio");
     println!("elliptical_dab_ratio → {:?}", s);
     println!(
@@ -8,7 +8,7 @@ fn main() {
     );
 
     // 加载 charcoal 并打印 base value
-    use libmypaint::Brush;
+    use mypaint::Brush;
     let json = std::fs::read_to_string("tests/brushes/charcoal.myb").unwrap();
     let mut b = Brush::new();
     let _ = b.from_string(&json);

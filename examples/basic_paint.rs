@@ -3,9 +3,9 @@
 //! 运行: cargo run --release --example basic_paint
 //! 输出: basic_paint.png
 
-use libmypaint::surface::fixed::FixedTiledSurface;
-use libmypaint::Brush;
-use libmypaint::Surface;
+use mypaint::surface::fixed::FixedTiledSurface;
+use mypaint::Brush;
+use mypaint::Surface;
 use std::fs;
 use std::path::Path;
 

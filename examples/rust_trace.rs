@@ -4,10 +4,10 @@
 //!
 //! 用法: cargo run --release --example rust_trace -- <brush.myb> <events.dat>
 
-use libmypaint::render::DabParams;
-use libmypaint::util::rect::Rectangles;
-use libmypaint::Brush;
-use libmypaint::Surface;
+use mypaint::render::DabParams;
+use mypaint::util::rect::Rectangles;
+use mypaint::Brush;
+use mypaint::Surface;
 use std::env;
 use std::fs;
 use std::io::Write;

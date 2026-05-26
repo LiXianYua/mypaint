@@ -1,4 +1,4 @@
-use libmypaint::Brush;
+use mypaint::Brush;
 use std::fs;
 
 #[test]
@@ -54,6 +54,6 @@ fn test_brush_from_defaults() {
     let mut brush = Brush::new();
     brush.from_defaults();
     // After from_defaults, opaque should be 1.0 (default)
-    use libmypaint::BrushSetting;
+    use mypaint::BrushSetting;
     assert!((brush.get_base_value(BrushSetting::Opaque) - 1.0).abs() < 1e-6);
 }

@@ -1,9 +1,9 @@
 //! 端到端测试：用真正的 FixedTiledSurface 渲染并验证像素被写入。
 
-use libmypaint::surface::fixed::FixedTiledSurface;
-use libmypaint::Brush;
-use libmypaint::BrushSetting;
-use libmypaint::Surface;
+use mypaint::surface::fixed::FixedTiledSurface;
+use mypaint::Brush;
+use mypaint::BrushSetting;
+use mypaint::Surface;
 
 #[test]
 fn draw_on_tiled_surface_produces_nonzero_pixels() {

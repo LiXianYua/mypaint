@@ -12,9 +12,9 @@
 //! cross.json 内含 2 段独立 stroke：当 sample 的 dtime==0.0 且不是 samples[0] 时，
 //! 调 brush.new_stroke() 重置 stroke 状态。
 
-use libmypaint::surface::fixed::FixedTiledSurface;
-use libmypaint::Brush;
-use libmypaint::Surface;
+use mypaint::surface::fixed::FixedTiledSurface;
+use mypaint::Brush;
+use mypaint::Surface;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;

@@ -23,8 +23,8 @@ alpha_eraser/color）bit-exact 完全相同，剩余字段仅有亚像素浮点�
 ## Quick Start
 
 ```rust
-use libmypaint::{Brush, Surface, BrushSetting};
-use libmypaint::surface::fixed::FixedTiledSurface;
+use mypaint::{Brush, Surface, BrushSetting};
+use mypaint::surface::fixed::FixedTiledSurface;
 
 let mut brush = Brush::new();
 brush.from_defaults();
@@ -58,7 +58,7 @@ surface.save_png(std::path::Path::new("stroke.png"), 0, 0, 256, 256);
 
 ```toml
 [dependencies]
-libmypaint = { version = "0.1", features = ["ffi"] }
+mypaint = { version = "0.1", features = ["ffi"] }
 ```
 
 ```bash

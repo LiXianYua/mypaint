@@ -2,7 +2,7 @@
 
 #![cfg(feature = "ffi")]
 
-use libmypaint::ffi::*;
+use mypaint::ffi::*;
 use std::ffi::CString;
 use std::os::raw::c_int;
 
