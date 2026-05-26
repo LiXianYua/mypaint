@@ -484,13 +484,115 @@ impl Brush {
     // update_smudge_color — mypaint-brush.c:920-997
     // =========================================================================
 
-    // (Implemented as free functions below to avoid borrow conflicts)
+    /// 对应 mypaint-brush.c:920-997 `update_smudge_color`。
+    /// 返回 true 时表示 sample alpha 不达 op_lim 阈值，caller 应早返 false。
+    ///
+    /// `surface` 是外部 borrow 不依赖 `self`，与 `self.fetch_smudge_bucket_mut()`
+    /// 的 `&mut self` 借用不冲突——所以这是 method 而不是 free fn。
+    #[allow(clippy::too_many_arguments)]
+    fn update_smudge_color(
+        &mut self,
+        surface: &mut dyn Surface,
+        smudge_length: f32,
+        smudge_length_log: f32,
+        smudge_radius_log: f32,
+        smudge_op_lim: f32,
+        px: i32,
+        py: i32,
+        radius: f32,
+        legacy_smudge: bool,
+        paint_factor: f32,
+    ) -> bool {
+        let bucket = self.fetch_smudge_bucket_mut();
+        // 对应 mypaint-brush.c:927-995。
+        // update_factor 可能在 recentness==0 时被改为 0（首次初始化：直接用采样色）。
+        let mut update_factor = 0.01f32.max(smudge_length);
 
-    // =========================================================================
-    // apply_smudge — mypaint-brush.c:999-1035
-    // =========================================================================
+        let recentness = bucket.recentness * update_factor;
+        bucket.recentness = recentness;
 
-    // (Implemented as free functions below)
+        let margin = 0.0000000000000001;
+        if recentness < 1.0f32.min((0.5 * update_factor).powf(smudge_length_log) + margin) {
+            if recentness == 0.0 {
+                // First initialization — sampled color used directly, no blend.
+                // 对应 mypaint-brush.c:942-945
+                update_factor = 0.0;
+            }
+            bucket.recentness = 1.0;
+
+            let smudge_radius =
+                (radius * smudge_radius_log.exp()).clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
+
+            let (r, g, b, a) = surface.get_color(
+                px as f32,
+                py as f32,
+                smudge_radius,
+                if legacy_smudge { -1.0 } else { paint_factor },
+            );
+
+            if (smudge_op_lim > 0.0 && a < smudge_op_lim)
+                || (smudge_op_lim < 0.0 && a > -smudge_op_lim)
+            {
+                return true;
+            }
+            bucket.prev = [r, g, b, a];
+        }
+
+        if legacy_smudge {
+            let fac_old = update_factor;
+            let fac_new = (1.0 - update_factor) * bucket.prev[3];
+            bucket.smudge[0] = fac_old * bucket.smudge[0] + fac_new * bucket.prev[0];
+            bucket.smudge[1] = fac_old * bucket.smudge[1] + fac_new * bucket.prev[1];
+            bucket.smudge[2] = fac_old * bucket.smudge[2] + fac_new * bucket.prev[2];
+            bucket.smudge[3] = (fac_old * bucket.smudge[3] + fac_new).clamp(0.0, 1.0);
+        } else if bucket.prev[3] > WGM_EPSILON * 10.0 {
+            let mixed = mix_colors(&bucket.smudge, &bucket.prev, update_factor, paint_factor);
+            bucket.smudge = mixed;
+        } else {
+            bucket.smudge[3] = (bucket.smudge[3] + bucket.prev[3]) / 2.0;
+        }
+        false
+    }
+
+    /// 对应 mypaint-brush.c:999-1035 `apply_smudge`。
+    #[inline]
+    fn apply_smudge(
+        &self,
+        smudge_value: f32,
+        legacy_smudge: bool,
+        paint_factor: f32,
+        color_r: &mut f32,
+        color_g: &mut f32,
+        color_b: &mut f32,
+    ) -> f32 {
+        let bucket = self.fetch_smudge_bucket_ref();
+        let smudge_factor = 1.0f32.min(smudge_value);
+        let eraser_target_alpha =
+            (1.0 - smudge_factor + smudge_factor * bucket.smudge[3]).clamp(0.0, 1.0);
+
+        if eraser_target_alpha > 0.0 {
+            if legacy_smudge {
+                let col_factor = 1.0 - smudge_factor;
+                *color_r = (smudge_factor * bucket.smudge[0] + col_factor * *color_r)
+                    / eraser_target_alpha;
+                *color_g = (smudge_factor * bucket.smudge[1] + col_factor * *color_g)
+                    / eraser_target_alpha;
+                *color_b = (smudge_factor * bucket.smudge[2] + col_factor * *color_b)
+                    / eraser_target_alpha;
+            } else {
+                let brush_color = [*color_r, *color_g, *color_b, 1.0];
+                let mixed = mix_colors(&bucket.smudge, &brush_color, smudge_factor, paint_factor);
+                *color_r = mixed[0];
+                *color_g = mixed[1];
+                *color_b = mixed[2];
+            }
+        } else {
+            *color_r = 1.0;
+            *color_g = 0.0;
+            *color_b = 0.0;
+        }
+        eraser_target_alpha
+    }
 
     // =========================================================================
     // prepare_and_draw_dab — mypaint-brush.c:1042-1250
@@ -574,22 +676,18 @@ impl Brush {
             let smudge_length_log = self.settings_value[BrushSetting::SmudgeLengthLog as usize];
             let smudge_radius_log = self.settings_value[BrushSetting::SmudgeRadiusLog as usize];
             let smudge_op_lim = self.settings_value[BrushSetting::SmudgeTransparency as usize];
-            let return_early = {
-                let bucket = self.fetch_smudge_bucket_mut();
-                update_smudge_color_fn(
-                    surface,
-                    bucket,
-                    smudge_length,
-                    smudge_length_log,
-                    smudge_radius_log,
-                    smudge_op_lim,
-                    x.round() as i32,
-                    y.round() as i32,
-                    radius,
-                    legacy_smudge,
-                    paint_factor,
-                )
-            };
+            let return_early = self.update_smudge_color(
+                surface,
+                smudge_length,
+                smudge_length_log,
+                smudge_radius_log,
+                smudge_op_lim,
+                x.round() as i32,
+                y.round() as i32,
+                radius,
+                legacy_smudge,
+                paint_factor,
+            );
             if return_early {
                 return false;
             }
@@ -598,9 +696,7 @@ impl Brush {
         let mut eraser_target_alpha = 1.0;
         let smudge_value = self.settings_value[BrushSetting::Smudge as usize];
         if smudge_value > 0.0 {
-            let bucket_copy = *self.fetch_smudge_bucket_ref();
-            eraser_target_alpha = apply_smudge_fn(
-                &bucket_copy,
+            eraser_target_alpha = self.apply_smudge(
                 smudge_value,
                 legacy_smudge,
                 paint_factor,
@@ -1033,112 +1129,9 @@ impl Brush {
     }
 }
 
-// =========================================================================
-// Free functions for smudge (to avoid borrow checker conflicts)
-// =========================================================================
-
-/// update_smudge_color — mypaint-brush.c:920-997.
-#[allow(clippy::too_many_arguments)]
-fn update_smudge_color_fn(
-    surface: &mut dyn Surface,
-    bucket: &mut SmudgeBucket,
-    smudge_length: f32,
-    smudge_length_log: f32,
-    smudge_radius_log: f32,
-    smudge_op_lim: f32,
-    px: i32,
-    py: i32,
-    radius: f32,
-    legacy_smudge: bool,
-    paint_factor: f32,
-) -> bool {
-    // 对应 mypaint-brush.c:927-995。
-    // update_factor 可能在 recentness==0 时被改为 0（首次初始化：直接用采样色）。
-    let mut update_factor = 0.01f32.max(smudge_length);
-
-    let recentness = bucket.recentness * update_factor;
-    bucket.recentness = recentness;
-
-    let margin = 0.0000000000000001;
-    if recentness < 1.0f32.min((0.5 * update_factor).powf(smudge_length_log) + margin) {
-        if recentness == 0.0 {
-            // First initialization — sampled color used directly, no blend.
-            // 对应 mypaint-brush.c:942-945
-            update_factor = 0.0;
-        }
-        bucket.recentness = 1.0;
-
-        let smudge_radius =
-            (radius * smudge_radius_log.exp()).clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
-
-        let (r, g, b, a) = surface.get_color(
-            px as f32,
-            py as f32,
-            smudge_radius,
-            if legacy_smudge { -1.0 } else { paint_factor },
-        );
-
-        if (smudge_op_lim > 0.0 && a < smudge_op_lim) || (smudge_op_lim < 0.0 && a > -smudge_op_lim)
-        {
-            return true;
-        }
-        bucket.prev = [r, g, b, a];
-    }
-
-    if legacy_smudge {
-        let fac_old = update_factor;
-        let fac_new = (1.0 - update_factor) * bucket.prev[3];
-        bucket.smudge[0] = fac_old * bucket.smudge[0] + fac_new * bucket.prev[0];
-        bucket.smudge[1] = fac_old * bucket.smudge[1] + fac_new * bucket.prev[1];
-        bucket.smudge[2] = fac_old * bucket.smudge[2] + fac_new * bucket.prev[2];
-        bucket.smudge[3] = (fac_old * bucket.smudge[3] + fac_new).clamp(0.0, 1.0);
-    } else if bucket.prev[3] > WGM_EPSILON * 10.0 {
-        let mixed = mix_colors(&bucket.smudge, &bucket.prev, update_factor, paint_factor);
-        bucket.smudge = mixed;
-    } else {
-        bucket.smudge[3] = (bucket.smudge[3] + bucket.prev[3]) / 2.0;
-    }
-    false
-}
-
-/// apply_smudge — mypaint-brush.c:999-1035.
-#[inline]
-fn apply_smudge_fn(
-    bucket: &SmudgeBucket,
-    smudge_value: f32,
-    legacy_smudge: bool,
-    paint_factor: f32,
-    color_r: &mut f32,
-    color_g: &mut f32,
-    color_b: &mut f32,
-) -> f32 {
-    let smudge_factor = 1.0f32.min(smudge_value);
-    let eraser_target_alpha =
-        (1.0 - smudge_factor + smudge_factor * bucket.smudge[3]).clamp(0.0, 1.0);
-
-    if eraser_target_alpha > 0.0 {
-        if legacy_smudge {
-            let col_factor = 1.0 - smudge_factor;
-            *color_r =
-                (smudge_factor * bucket.smudge[0] + col_factor * *color_r) / eraser_target_alpha;
-            *color_g =
-                (smudge_factor * bucket.smudge[1] + col_factor * *color_g) / eraser_target_alpha;
-            *color_b =
-                (smudge_factor * bucket.smudge[2] + col_factor * *color_b) / eraser_target_alpha;
-        } else {
-            let brush_color = [*color_r, *color_g, *color_b, 1.0];
-            let mixed = mix_colors(&bucket.smudge, &brush_color, smudge_factor, paint_factor);
-            *color_r = mixed[0];
-            *color_g = mixed[1];
-            *color_b = mixed[2];
-        }
-    } else {
-        *color_r = 1.0;
-        *color_g = 0.0;
-        *color_b = 0.0;
-    }
-    eraser_target_alpha
-}
+// （之前这里有两个 "free functions to dodge borrow checker"，P3 把它们
+//  改成 impl Brush 方法 — surface 跟 self 是不相关的 borrow，原本的借用
+//  冲突是假想的。详见下方 update_smudge_color / apply_smudge 方法。）
 
 /// 调试用：在 stderr 上打印 brush 输入。对应 mypaint-brush.c:667-699 的 print_inputs。
 /// 仅当 brush.print_inputs == true 时调用。
