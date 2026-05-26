@@ -1,9 +1,18 @@
-# libmypaint (Rust)
+# libmypaint (Rust) — `literal-c-port` 历史分支
+
+> ⚠️ **这是历史/参考分支，不是开发主线。**
+>
+> 这里保留 [libmypaint](https://github.com/mypaint/libmypaint) C 上游的
+> **逐行 1:1 翻译终态**，作为后续 idiomatic Rust 重构的对照基准。
+> 日常开发请用 [`main` 分支](https://github.com/LiXianYua/mypaint/tree/main)
+> —— 那里已经完成了错误处理 / 颜色类型安全 / stroke.rs 拆分 / 公开 API
+> 重塑等 4 个里程碑的重构，FFI ABI 兼容 + 算法行为等价（非随机 brush
+> 100% bit-exact 跟 patched C 上游一致）。
 
 [libmypaint](https://github.com/mypaint/libmypaint) 画笔引擎的 Rust 1:1 复刻。
 
 逐行翻译自 C 源码（约 6364 行 → 4900+ 行 Rust），通过 dab 参数 trace 对照
-在 62k+ 笔触上验证与 C 上游行为等价：4/5 个测试笔刷的 dab 数量精确一致，
+在 62k+ 笔触上验证与 C 上游行为等价：4/5 个测试笔刷的 dab 数量精确一致,
 所有结构化参数（aspect/angle/opaque/lock_alpha/colorize/posterize/paint/
 alpha_eraser/color）bit-exact 完全相同，剩余字段仅有亚像素浮点累积误差
 （<1e-3 像素）。
