@@ -86,6 +86,13 @@ impl FixedTileBackend {
     /// 内存不重叠，可并行使用。
     #[doc(hidden)]
     pub unsafe fn parallel_tile_slots(&mut self, tiles: &[(i32, i32)]) -> Vec<TileSlot> {
+        debug_assert!(
+            {
+                let mut seen = std::collections::HashSet::new();
+                tiles.iter().all(|t| seen.insert(t))
+            },
+            "parallel_tile_slots requires unique (tx, ty) — duplicates would alias"
+        );
         // 用 *mut u16 暴露给 process_op；Premul15 的 #[repr(transparent)]
         // 保证 layout 等价。
         let base_ptr = self.tile_buffer.as_mut_ptr() as *mut u16;
@@ -150,11 +157,12 @@ impl TileBackend for FixedTileBackend {
                 if let Some(off) = self.tile_offset(tx, ty) {
                     let pix_idx = off + (in_tile_y * TILE_SIZE + in_tile_x) * 4;
                     let dst = (py * w + px) * 4;
-                    // 15-bit premul → 8-bit sRGB-ish 截断（与 C 上游一致 >> 7）
-                    png_data[dst] = (self.tile_buffer[pix_idx].raw() >> 7) as u8;
-                    png_data[dst + 1] = (self.tile_buffer[pix_idx + 1].raw() >> 7) as u8;
-                    png_data[dst + 2] = (self.tile_buffer[pix_idx + 2].raw() >> 7) as u8;
-                    png_data[dst + 3] = (self.tile_buffer[pix_idx + 3].raw() >> 7) as u8;
+                    // 15-bit premul → 8-bit sRGB-ish；to_u8 处理了 SCALE=32768
+                    // 的边界（32768 >> 7 = 256，naive `as u8` 会 wrap 到 0）。
+                    png_data[dst] = self.tile_buffer[pix_idx].to_u8();
+                    png_data[dst + 1] = self.tile_buffer[pix_idx + 1].to_u8();
+                    png_data[dst + 2] = self.tile_buffer[pix_idx + 2].to_u8();
+                    png_data[dst + 3] = self.tile_buffer[pix_idx + 3].to_u8();
                 }
             }
         }

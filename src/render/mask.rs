@@ -203,12 +203,30 @@ impl Premul15 {
         self.0
     }
 
+    /// 把 15-bit premultiplied 值压到 8-bit `u8`（sRGB-ish PNG 输出用）。
+    ///
+    /// `>> 7` 后再 `min(255)` 防 [`FULL`](Self::FULL) (= 32768) 的边界值：
+    /// 32768 >> 7 = 256，`256 as u8` 会 wrap 到 0；min(255) 让满值像素
+    /// 正确输出为 255。
+    #[inline]
+    pub const fn to_u8(self) -> u8 {
+        let v = (self.0 >> 7) as u32;
+        if v > 255 {
+            255
+        } else {
+            v as u8
+        }
+    }
+
     /// 把 `&mut [Premul15]` 重新解释为 `&mut [u16]`（layout-identical cast）。
     ///
-    /// 安全的方向（Premul15 子集 ⊆ u16），不破坏类型不变量；用于 trait /
-    /// FFI 边界仍需暴露 raw `[u16]` 接口的场景。
+    /// **逻辑 invariant 警告**：layout cast 本身不引发 UB（任何 u16 位模式
+    /// 都是合法 `Premul15` 字面位），但通过返回的 `&mut [u16]` 写入 > SCALE
+    /// 的值会违反 `Premul15` 的逻辑不变量（0..=SCALE）。仅供 crate 内部
+    /// 把 `Vec<Premul15>` 透出 `[u16]` 接口给 trait / FFI 用，调用方负责
+    /// 不写入 OOR 值（blend 路径通过 [`Self::from_scaled_u32`] 饱和保证）。
     #[inline]
-    pub fn slice_as_u16_mut(s: &mut [Self]) -> &mut [u16] {
+    pub(crate) fn slice_as_u16_mut(s: &mut [Self]) -> &mut [u16] {
         // SAFETY: Premul15 is #[repr(transparent)] over u16 with no niches.
         // Layout, alignment, and bit-pattern validity of [Premul15] and
         // [u16] are identical, so reinterpreting the slice is sound. The
@@ -216,7 +234,7 @@ impl Premul15 {
         unsafe { std::slice::from_raw_parts_mut(s.as_mut_ptr() as *mut u16, s.len()) }
     }
 
-    /// 把 `&[Premul15]` 重新解释为 `&[u16]`。
+    /// 把 `&[Premul15]` 重新解释为 `&[u16]`（只读方向无 invariant 风险）。
     #[inline]
     pub fn slice_as_u16(s: &[Self]) -> &[u16] {
         // SAFETY: same as `slice_as_u16_mut` — layout/align/validity equiv.
@@ -500,6 +518,24 @@ mod tests {
         assert_eq!(Premul15::from_unit_f32(2.0), Premul15::FULL);
         // NaN clamps to NaN then `as u16` = 0
         assert_eq!(Premul15::from_unit_f32(f32::NAN).raw(), 0);
+    }
+
+    #[test]
+    fn premul15_to_u8_handles_full_boundary() {
+        // The latent bug from C upstream: 32768 >> 7 = 256, naive `as u8` wraps to 0.
+        assert_eq!(Premul15::ZERO.to_u8(), 0);
+        assert_eq!(
+            Premul15::FULL.to_u8(),
+            255,
+            "FULL must map to 255, not wrap to 0"
+        );
+        // Just below SCALE: 32767 >> 7 = 255
+        assert_eq!(
+            Premul15::new_saturating((Premul15::SCALE - 1) as u16).to_u8(),
+            255
+        );
+        // Half-ish
+        assert_eq!(Premul15::new_saturating(16384).to_u8(), 128);
     }
 
     #[test]
