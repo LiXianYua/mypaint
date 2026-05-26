@@ -10,7 +10,7 @@
 //! - count_dabs_to (L1253-1287)
 //! - mypaint_brush_stroke_to (L1300-1547)
 
-use crate::brush::Brush;
+use crate::brush::{Brush, SmudgeBucket};
 use crate::render::color::*;
 use crate::render::DabParams;
 use crate::smudge::mix_colors;
@@ -23,18 +23,6 @@ use crate::NUM_INPUTS;
 const ACTUAL_RADIUS_MIN: f32 = 0.2;
 const ACTUAL_RADIUS_MAX: f32 = 1000.0;
 const GRID_SIZE: f32 = 256.0;
-
-/// Smudge bucket field indices (matching C enum).
-const SMUDGE_R: usize = 0;
-const SMUDGE_G: usize = 1;
-const SMUDGE_B: usize = 2;
-const SMUDGE_A: usize = 3;
-const PREV_COL_R: usize = 4;
-const PREV_COL_G: usize = 5;
-const PREV_COL_B: usize = 6;
-const PREV_COL_A: usize = 7;
-const PREV_COL_RECENTNESS: usize = 8;
-const SMUDGE_BUCKET_SIZE: usize = 9;
 
 struct Offsets {
     x: f32,
@@ -419,7 +407,7 @@ impl Brush {
     // 无桶配置时回退到 inline_bucket（等价于 C 的 STATE(SMUDGE_RA) 默认行为）
     // =========================================================================
 
-    fn fetch_smudge_bucket_mut(&mut self) -> &mut [f32; SMUDGE_BUCKET_SIZE] {
+    fn fetch_smudge_bucket_mut(&mut self) -> &mut SmudgeBucket {
         let has_buckets = self.smudge_buckets.as_ref().is_some_and(|b| !b.is_empty());
         if !has_buckets {
             return &mut self.inline_bucket;
@@ -439,7 +427,7 @@ impl Brush {
         &mut self.smudge_buckets.as_mut().unwrap()[bucket_index]
     }
 
-    fn fetch_smudge_bucket_ref(&self) -> &[f32; SMUDGE_BUCKET_SIZE] {
+    fn fetch_smudge_bucket_ref(&self) -> &SmudgeBucket {
         let has_buckets = self.smudge_buckets.as_ref().is_some_and(|b| !b.is_empty());
         if !has_buckets {
             return &self.inline_bucket;
@@ -1052,9 +1040,10 @@ impl Brush {
 // =========================================================================
 
 /// update_smudge_color — mypaint-brush.c:920-997.
+#[allow(clippy::too_many_arguments)]
 fn update_smudge_color_fn(
     surface: &mut dyn Surface,
-    bucket: &mut [f32; SMUDGE_BUCKET_SIZE],
+    bucket: &mut SmudgeBucket,
     smudge_length: f32,
     smudge_length_log: f32,
     smudge_radius_log: f32,
@@ -1069,8 +1058,8 @@ fn update_smudge_color_fn(
     // update_factor 可能在 recentness==0 时被改为 0（首次初始化：直接用采样色）。
     let mut update_factor = 0.01f32.max(smudge_length);
 
-    let recentness = bucket[PREV_COL_RECENTNESS] * update_factor;
-    bucket[PREV_COL_RECENTNESS] = recentness;
+    let recentness = bucket.recentness * update_factor;
+    bucket.recentness = recentness;
 
     let margin = 0.0000000000000001;
     if recentness < 1.0f32.min((0.5 * update_factor).powf(smudge_length_log) + margin) {
@@ -1079,7 +1068,7 @@ fn update_smudge_color_fn(
             // 对应 mypaint-brush.c:942-945
             update_factor = 0.0;
         }
-        bucket[PREV_COL_RECENTNESS] = 1.0;
+        bucket.recentness = 1.0;
 
         let smudge_radius =
             (radius * smudge_radius_log.exp()).clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
@@ -1095,44 +1084,21 @@ fn update_smudge_color_fn(
         {
             return true;
         }
-        bucket[PREV_COL_R] = r;
-        bucket[PREV_COL_G] = g;
-        bucket[PREV_COL_B] = b;
-        bucket[PREV_COL_A] = a;
+        bucket.prev = [r, g, b, a];
     }
 
     if legacy_smudge {
         let fac_old = update_factor;
-        let fac_new = (1.0 - update_factor) * bucket[PREV_COL_A];
-        bucket[SMUDGE_R] = fac_old * bucket[SMUDGE_R] + fac_new * bucket[PREV_COL_R];
-        bucket[SMUDGE_G] = fac_old * bucket[SMUDGE_G] + fac_new * bucket[PREV_COL_G];
-        bucket[SMUDGE_B] = fac_old * bucket[SMUDGE_B] + fac_new * bucket[PREV_COL_B];
-        bucket[SMUDGE_A] = (fac_old * bucket[SMUDGE_A] + fac_new).clamp(0.0, 1.0);
-    } else if bucket[PREV_COL_A] > WGM_EPSILON * 10.0 {
-        let prev_smudge_color = [
-            bucket[SMUDGE_R],
-            bucket[SMUDGE_G],
-            bucket[SMUDGE_B],
-            bucket[SMUDGE_A],
-        ];
-        let sampled_color = [
-            bucket[PREV_COL_R],
-            bucket[PREV_COL_G],
-            bucket[PREV_COL_B],
-            bucket[PREV_COL_A],
-        ];
-        let mixed = mix_colors(
-            &prev_smudge_color,
-            &sampled_color,
-            update_factor,
-            paint_factor,
-        );
-        bucket[SMUDGE_R] = mixed[0];
-        bucket[SMUDGE_G] = mixed[1];
-        bucket[SMUDGE_B] = mixed[2];
-        bucket[SMUDGE_A] = mixed[3];
+        let fac_new = (1.0 - update_factor) * bucket.prev[3];
+        bucket.smudge[0] = fac_old * bucket.smudge[0] + fac_new * bucket.prev[0];
+        bucket.smudge[1] = fac_old * bucket.smudge[1] + fac_new * bucket.prev[1];
+        bucket.smudge[2] = fac_old * bucket.smudge[2] + fac_new * bucket.prev[2];
+        bucket.smudge[3] = (fac_old * bucket.smudge[3] + fac_new).clamp(0.0, 1.0);
+    } else if bucket.prev[3] > WGM_EPSILON * 10.0 {
+        let mixed = mix_colors(&bucket.smudge, &bucket.prev, update_factor, paint_factor);
+        bucket.smudge = mixed;
     } else {
-        bucket[SMUDGE_A] = (bucket[SMUDGE_A] + bucket[PREV_COL_A]) / 2.0;
+        bucket.smudge[3] = (bucket.smudge[3] + bucket.prev[3]) / 2.0;
     }
     false
 }
@@ -1140,7 +1106,7 @@ fn update_smudge_color_fn(
 /// apply_smudge — mypaint-brush.c:999-1035.
 #[inline]
 fn apply_smudge_fn(
-    bucket: &[f32; SMUDGE_BUCKET_SIZE],
+    bucket: &SmudgeBucket,
     smudge_value: f32,
     legacy_smudge: bool,
     paint_factor: f32,
@@ -1150,26 +1116,20 @@ fn apply_smudge_fn(
 ) -> f32 {
     let smudge_factor = 1.0f32.min(smudge_value);
     let eraser_target_alpha =
-        (1.0 - smudge_factor + smudge_factor * bucket[SMUDGE_A]).clamp(0.0, 1.0);
+        (1.0 - smudge_factor + smudge_factor * bucket.smudge[3]).clamp(0.0, 1.0);
 
     if eraser_target_alpha > 0.0 {
         if legacy_smudge {
             let col_factor = 1.0 - smudge_factor;
             *color_r =
-                (smudge_factor * bucket[SMUDGE_R] + col_factor * *color_r) / eraser_target_alpha;
+                (smudge_factor * bucket.smudge[0] + col_factor * *color_r) / eraser_target_alpha;
             *color_g =
-                (smudge_factor * bucket[SMUDGE_G] + col_factor * *color_g) / eraser_target_alpha;
+                (smudge_factor * bucket.smudge[1] + col_factor * *color_g) / eraser_target_alpha;
             *color_b =
-                (smudge_factor * bucket[SMUDGE_B] + col_factor * *color_b) / eraser_target_alpha;
+                (smudge_factor * bucket.smudge[2] + col_factor * *color_b) / eraser_target_alpha;
         } else {
-            let smudge_color = [
-                bucket[SMUDGE_R],
-                bucket[SMUDGE_G],
-                bucket[SMUDGE_B],
-                bucket[SMUDGE_A],
-            ];
             let brush_color = [*color_r, *color_g, *color_b, 1.0];
-            let mixed = mix_colors(&smudge_color, &brush_color, smudge_factor, paint_factor);
+            let mixed = mix_colors(&bucket.smudge, &brush_color, smudge_factor, paint_factor);
             *color_r = mixed[0];
             *color_g = mixed[1];
             *color_b = mixed[2];

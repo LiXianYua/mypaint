@@ -10,7 +10,10 @@ pub use settings::BrushSettingData;
 pub use state::BrushState;
 
 mod json;
+mod smudge_bucket;
 mod stroke;
+
+pub(crate) use smudge_bucket::SmudgeBucket;
 
 use crate::util::rng::RngDouble;
 use crate::BrushSetting;
@@ -19,18 +22,15 @@ use crate::NUM_SETTINGS;
 use crate::SETTING_INFO;
 // state and settings are re-exported above
 
-/// Smudge bucket: R, G, B, A, prevR, prevG, prevB, prevA, recentness
-const SMUDGE_BUCKET_SIZE: usize = 9;
-
 /// The MyPaint brush engine.
 pub struct Brush {
     pub(crate) settings: [BrushSettingData; NUM_SETTINGS],
     pub(crate) state: BrushState,
-    /// Optional 256-bucket smudge state. None / empty → use `inline_bucket`.
-    pub(crate) smudge_buckets: Option<Vec<[f32; SMUDGE_BUCKET_SIZE]>>,
+    /// Optional N-bucket smudge state. None → use `inline_bucket`.
+    pub(crate) smudge_buckets: Option<Vec<SmudgeBucket>>,
     /// Fallback bucket used when no buckets are configured. Mirrors how C
     /// uses STATE(SMUDGE_RA..PREV_COL_RECENTNESS) as a default bucket.
-    pub(crate) inline_bucket: [f32; SMUDGE_BUCKET_SIZE],
+    pub(crate) inline_bucket: SmudgeBucket,
     /// 已写入的 bucket 索引范围（-1 = 从未写入）。对应 C mypaint_brush.c 的
     /// min_bucket_used / max_bucket_used。
     pub(crate) min_bucket_used: i32,
@@ -75,11 +75,11 @@ impl Brush {
             settings: std::array::from_fn(|_| BrushSettingData::new()),
             state: BrushState::zeroed(),
             smudge_buckets: if num_smudge_buckets > 0 {
-                Some(vec![[0.0; SMUDGE_BUCKET_SIZE]; num_smudge_buckets])
+                Some(vec![SmudgeBucket::zero(); num_smudge_buckets])
             } else {
                 None
             },
-            inline_bucket: [0.0; SMUDGE_BUCKET_SIZE],
+            inline_bucket: SmudgeBucket::zero(),
             min_bucket_used: init_min,
             max_bucket_used: init_max,
             rng: RngDouble::new(1000),
@@ -117,13 +117,13 @@ impl Brush {
                 let lo = self.min_bucket_used as usize;
                 let hi = (self.max_bucket_used as usize).min(buckets.len().saturating_sub(1));
                 for b in &mut buckets[lo..=hi] {
-                    *b = [0.0; SMUDGE_BUCKET_SIZE];
+                    *b = SmudgeBucket::zero();
                 }
                 self.min_bucket_used = -1;
                 self.max_bucket_used = -1;
             }
         }
-        self.inline_bucket = [0.0; SMUDGE_BUCKET_SIZE];
+        self.inline_bucket = SmudgeBucket::zero();
     }
 
     // ============== Smudge bucket public state API ==============
@@ -162,16 +162,17 @@ impl Brush {
                 len: buckets.len(),
             });
         }
-        let b_slot = &mut buckets[bucket_index];
-        b_slot[0] = r;
-        b_slot[1] = g;
-        b_slot[2] = b;
-        b_slot[3] = a;
-        b_slot[4] = prev_r;
-        b_slot[5] = prev_g;
-        b_slot[6] = prev_b;
-        b_slot[7] = prev_a;
-        b_slot[8] = prev_color_recentness;
+        buckets[bucket_index] = SmudgeBucket::from_array([
+            r,
+            g,
+            b,
+            a,
+            prev_r,
+            prev_g,
+            prev_b,
+            prev_a,
+            prev_color_recentness,
+        ]);
         Ok(())
     }
 
@@ -184,8 +185,8 @@ impl Brush {
         if bucket_index >= buckets.len() {
             return None;
         }
-        let b = &buckets[bucket_index];
-        Some((b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]))
+        let a = buckets[bucket_index].to_array();
+        Some((a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8]))
     }
 
     /// 已写入的最小 bucket 索引（-1 = 从未使用）。
