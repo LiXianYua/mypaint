@@ -10,7 +10,7 @@
 use crate::surface::Surface;
 use crate::surface::operations::{OperationQueue, OpDrawDab, TileIndex};
 use crate::render::DabParams;
-use crate::render::dab::{calculate_rr, calculate_rr_antialiased, calculate_opa, MaskParams};
+// dab geometry helpers — used by render_dab_mask（不再直接在 tile.rs 引用）
 use crate::render::mask::{render_dab_mask, MaskBuffer};
 use crate::render::blend::{
     blend_dab_normal, blend_dab_normal_eraser,
@@ -280,33 +280,70 @@ impl Surface for TiledSurface {
         modified
     }
 
+    /// 对应 mypaint-tiled-surface.c:get_color (L800-926)。
+    /// 关键步骤：先 process_tile flush 待处理 ops，再用 render_dab_mask 算 mask，
+    /// 用 get_color_pixels_accumulate 做加权采样（含光谱混合）。
     fn get_color(&mut self, x: f32, y: f32, radius: f32, paint: f32) -> (f32, f32, f32, f32) {
         if radius < 0.1 { return (0.0, 0.0, 0.0, 0.0); }
 
-        // 与 draw_dab 一样按 tile 切分，遍历每个 tile 用 RLE mask 加权采样
         let r_fringe = radius + 1.0;
         let tx1 = Self::pixel_to_tile(x - r_fringe);
         let tx2 = Self::pixel_to_tile(x + r_fringe);
         let ty1 = Self::pixel_to_tile(y - r_fringe);
         let ty2 = Self::pixel_to_tile(y + r_fringe);
 
-        let mask_params = MaskParams::from_hardness_softness(0.5, 0.5);
-        let one_over_radius2 = 1.0 / (radius * radius);
+        // C 用 sample_interval 跳过部分像素（perf 优化）；这里全采样，结果一致
+        let mut sum_weight = 0.0f32;
+        let mut sum_r = 0.0f32;
+        let mut sum_g = 0.0f32;
+        let mut sum_b = 0.0f32;
+        let mut sum_a = 0.0f32;
 
-        let (mut sum_w, mut sr, mut sg, mut sb, mut sa) = (0.0f32, 0.0, 0.0, 0.0, 0.0);
+        // paint > 0: 累加光谱；paint < 0: legacy (additive only)
+        let mut avg_spectral = [0.0f32; 10];
+        let mut avg_rgb = [0.0f32; 3];
+
+        let mut mask_buf = MaskBuffer::new();
+
         for ty in ty1..=ty2 {
             for tx in tx1..=tx2 {
+                // CRITICAL: flush 该 tile 的待处理 ops（对应 C L862-863）
+                self.process_tile(tx, ty);
+
+                // 取 tile snapshot 用于读
                 let Some(tile) = self.backend.tile_snapshot(tx, ty) else { continue };
+
                 let local_x = x - (tx * TILE_SIZE as i32) as f32;
                 let local_y = y - (ty * TILE_SIZE as i32) as f32;
-                let _ = paint; // 简化版仍用线性，paint > 0 留 TODO
-                accumulate_tile_color(&tile, local_x, local_y,
-                    aspect(1.0), 0.0, 1.0, one_over_radius2, &mask_params,
-                    &mut sum_w, &mut sr, &mut sg, &mut sb, &mut sa);
+                // mask 计算用 hardness=0.5, softness=0.5 (与 C 一致 — 圆形 mask)
+                render_dab_mask(&mut mask_buf, local_x, local_y, radius,
+                    0.5, 0.5, 1.0, 0.0);
+
+                accumulate_tile_color_rle(mask_buf.as_slice(), &tile,
+                    paint, &mut sum_weight, &mut sum_r, &mut sum_g, &mut sum_b, &mut sum_a,
+                    &mut avg_spectral, &mut avg_rgb);
             }
         }
-        if sum_w == 0.0 { return (0.0, 0.0, 0.0, 0.0); }
-        (sr / sum_w, sg / sum_w, sb / sum_w, sa / sum_w)
+
+        if sum_weight == 0.0 {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+        let alpha = (sum_a / sum_weight).clamp(0.0, 1.0);
+
+        if paint < 0.0 {
+            // legacy: divide by sum_weight
+            let r = (sum_r / sum_weight).clamp(0.0, 1.0);
+            let g = (sum_g / sum_weight).clamp(0.0, 1.0);
+            let b = (sum_b / sum_weight).clamp(0.0, 1.0);
+            return (r, g, b, alpha);
+        }
+
+        // paint >= 0: 混合 spectral + additive
+        let (spec_r, spec_g, spec_b) = crate::smudge::spectral_to_rgb(&avg_spectral);
+        let r = (spec_r * paint + (1.0 - paint) * avg_rgb[0]).clamp(0.0, 1.0);
+        let g = (spec_g * paint + (1.0 - paint) * avg_rgb[1]).clamp(0.0, 1.0);
+        let b = (spec_b * paint + (1.0 - paint) * avg_rgb[2]).clamp(0.0, 1.0);
+        (r, g, b, alpha)
     }
 
     /// 对应 mypaint_tiled_surface_begin_atomic：更新 symmetry 矩阵，准备 bbox。
@@ -343,28 +380,79 @@ impl Surface for TiledSurface {
     }
 }
 
-/// 一个 tile snapshot 的加权采样累加。供 get_color 使用。
-fn accumulate_tile_color(
-    tile: &[u16], local_x: f32, local_y: f32,
-    aspect_ratio: f32, sn: f32, cs: f32, one_over_radius2: f32,
-    mask_params: &MaskParams,
-    sum_w: &mut f32, sum_r: &mut f32, sum_g: &mut f32, sum_b: &mut f32, sum_a: &mut f32,
+/// 对一个 tile 用 RLE mask 加权采样，累加到外部 sum_* 状态。
+/// 对应 brushmodes.c:get_color_pixels_accumulate (L546-626)。
+///
+/// - `paint < 0`: 走 legacy 路径 — 仅累加 additive sum_r/g/b (premultiplied)。
+/// - `paint >= 0`: 同时维护 avg_spectral 和 avg_rgb，最后由调用方合并。
+fn accumulate_tile_color_rle(
+    mask: &[u16], tile: &[u16],
+    paint: f32,
+    sum_weight: &mut f32, sum_r: &mut f32, sum_g: &mut f32, sum_b: &mut f32, sum_a: &mut f32,
+    avg_spectral: &mut [f32; 10], avg_rgb: &mut [f32; 3],
 ) {
-    for py in 0..TILE_SIZE {
-        for px in 0..TILE_SIZE {
-            let rr = calculate_rr(px as i32, py as i32, local_x, local_y,
-                aspect_ratio, sn, cs, one_over_radius2);
-            let opa = calculate_opa(rr, mask_params);
-            if opa <= 0.0 { continue; }
-            let idx = (py * TILE_SIZE + px) * 4;
-            *sum_w += opa;
-            *sum_r += opa * tile[idx]     as f32 / SCALE as f32;
-            *sum_g += opa * tile[idx + 1] as f32 / SCALE as f32;
-            *sum_b += opa * tile[idx + 2] as f32 / SCALE as f32;
-            *sum_a += opa * tile[idx + 3] as f32 / SCALE as f32;
-        }
+    use crate::smudge::rgb_to_spectral;
+
+    if paint < 0.0 {
+        // Legacy: 纯加权累加 premultiplied RGBA
+        // 对应 brushmodes.c:get_color_pixels_legacy (L491-532)
+        iter_rle_mask_get_color(mask, tile, |m, px| {
+            let opa = m as u32;
+            *sum_weight += m as f32 / SCALE as f32;
+            *sum_r += (opa * px[0] as u32 / SCALE) as f32;
+            *sum_g += (opa * px[1] as u32 / SCALE) as f32;
+            *sum_b += (opa * px[2] as u32 / SCALE) as f32;
+            *sum_a += (opa * px[3] as u32 / SCALE) as f32;
+        });
+        return;
     }
+
+    // paint >= 0: 加性 RGB + 可选光谱混合
+    iter_rle_mask_get_color(mask, tile, |m, px| {
+        let a = m as f32 * px[3] as f32 / ((1u32 << 30) as f32);
+        let alpha_sums = a + *sum_a;
+        *sum_weight += m as f32 / SCALE as f32;
+        let (fac_a, fac_b) = if alpha_sums > 0.0 {
+            let fa = a / alpha_sums;
+            (fa, 1.0 - fa)
+        } else {
+            (1.0, 1.0)
+        };
+        if paint > 0.0 && px[3] > 0 {
+            let spectral = rgb_to_spectral(
+                px[0] as f32 / px[3] as f32,
+                px[1] as f32 / px[3] as f32,
+                px[2] as f32 / px[3] as f32);
+            for i in 0..10 {
+                avg_spectral[i] = spectral[i].powf(fac_a) * avg_spectral[i].powf(fac_b);
+            }
+        }
+        if paint < 1.0 && px[3] > 0 {
+            for i in 0..3 {
+                avg_rgb[i] = px[i] as f32 * fac_a / px[3] as f32 + avg_rgb[i] * fac_b;
+            }
+        }
+        *sum_a += a;
+    });
 }
 
+/// 遍历 RLE mask 同步访问 tile RGBA。
 #[inline]
-fn aspect(v: f32) -> f32 { v.max(1.0) }
+fn iter_rle_mask_get_color<F: FnMut(u16, &[u16; 4])>(mask: &[u16], tile: &[u16], mut f: F) {
+    let mut mi: usize = 0;
+    let mut ri: usize = 0;
+    loop {
+        while mi < mask.len() && mask[mi] != 0 {
+            if ri + 4 > tile.len() { return; }
+            let px: &[u16; 4] = (&tile[ri..ri + 4]).try_into().unwrap();
+            f(mask[mi], px);
+            mi += 1;
+            ri += 4;
+        }
+        if mi + 1 >= mask.len() || mask[mi + 1] == 0 {
+            return;
+        }
+        ri += mask[mi + 1] as usize;
+        mi += 2;
+    }
+}
