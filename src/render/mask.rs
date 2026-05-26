@@ -135,6 +135,108 @@ impl RleSkip {
 // 编译期常量校验：Coverage15::SCALE 必须能装进 u16 字段。
 const _: () = assert!(Coverage15::SCALE <= u16::MAX as u32);
 
+// ============================================================================
+// Premul15 — premultiplied 颜色 channel
+// ============================================================================
+
+/// 0..=`SCALE` (1<<15 = 32768) 的 premultiplied 颜色 channel 值。
+///
+/// `tile_buffer: Vec<u16>` 里的每个 u16 都是这个类型语义；用 newtype 区分
+/// 像素 channel 和其他 u16 类型 ([`Coverage15`] / [`RleSkip`])。
+///
+/// `#[repr(transparent)]` 保证 layout 与 u16 等价 —— `&mut [u16; 4]` 可以
+/// 通过 [`crate::render::mask`] / [`crate::surface::tile`] 内部的 unsafe
+/// cast 转 `&mut [Premul15; 4]`，零 runtime 开销。
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Premul15(u16);
+
+impl Premul15 {
+    /// 满 channel 值（1<<15）。共享 [`Coverage15::SCALE`]。
+    pub const SCALE: u32 = Coverage15::SCALE;
+
+    /// 全 0（透明黑的某个 channel）。
+    pub const ZERO: Self = Self(0);
+
+    /// 满值（不透明白的某个 channel）。
+    pub const FULL: Self = Self(Self::SCALE as u16);
+
+    /// 从 u16 构造，超过 SCALE 时饱和到 [`FULL`](Self::FULL)。
+    #[inline]
+    pub const fn new_saturating(v: u16) -> Self {
+        if (v as u32) > Self::SCALE {
+            Self::FULL
+        } else {
+            Self(v)
+        }
+    }
+
+    /// 从 0..=1 的 f32 构造（自动 clamp + scale）。
+    #[inline]
+    pub fn from_unit_f32(v: f32) -> Self {
+        Self((v.clamp(0.0, 1.0) * Self::SCALE as f32) as u16)
+    }
+
+    /// blend 算法专用：从 `(a*b + c*d) / SCALE` 这种已知在 0..=SCALE
+    /// 范围的 u32 转回 `Premul15`。debug 校验范围。
+    #[inline]
+    pub(crate) fn from_scaled_u32(v: u32) -> Self {
+        debug_assert!(
+            v <= Self::SCALE,
+            "Premul15::from_scaled_u32: {v} > SCALE — blend overflow?"
+        );
+        Self(v as u16)
+    }
+
+    /// 取出内部 u16，用于 u32 / u16 整数运算。
+    #[inline]
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+}
+
+// ============================================================================
+// RleEntry — 集中化的 mask buffer decode
+// ============================================================================
+
+/// 从 RLE mask buffer 解析出的一个 entry。
+///
+/// 由 [`RleEntry::parse`] 在单一入口产生，消除"读 buffer 时把 skip 当
+/// coverage（或反之）"的可能 — 这是 [`Coverage15`] / [`RleSkip`] newtype
+/// 安全保证的关键 chokepoint。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RleEntry {
+    /// 一个像素的 coverage。
+    Pixel(Coverage15),
+    /// 跳过 N 个像素。
+    Skip(RleSkip),
+    /// 终止符 / buffer 越界。
+    End,
+}
+
+impl RleEntry {
+    /// 解析 `buf[offset]` 处的下一个 entry。返回 `(entry, 在 buf 中占的 u16 数)`。
+    ///
+    /// 终止符占 0 个 u16（视作 buffer 边界），便于 caller 直接 break。
+    #[inline]
+    pub fn parse(buf: &[u16], offset: usize) -> (Self, usize) {
+        if offset >= buf.len() {
+            return (Self::End, 0);
+        }
+        let v = buf[offset];
+        if v != 0 {
+            return (Self::Pixel(Coverage15::from_raw(v)), 1);
+        }
+        // v == 0：检查后续是 skip 长度还是终止
+        if offset + 1 >= buf.len() || buf[offset + 1] == 0 {
+            return (Self::End, 0);
+        }
+        (Self::Skip(RleSkip::from_raw(buf[offset + 1])), 2)
+    }
+}
+
+const _: () = assert!(Premul15::SCALE <= u16::MAX as u32);
+
 const SCALE: u32 = Coverage15::SCALE;
 
 /// Mask buffer for one tile. 最长情况：每个像素一个值 + tile 边界跳过。

@@ -1,6 +1,7 @@
 //! Tile operation queue + dirty tile tracking.
 //! 对应 operationqueue.c + tilemap.c。
 
+use crate::render::mask::Premul15;
 use std::collections::HashMap;
 
 /// 一个 dab 操作，已经准备好被某个 tile 渲染。
@@ -10,9 +11,9 @@ pub struct OpDrawDab {
     pub x: f32,
     pub y: f32,
     pub radius: f32,
-    pub color_r: u16,
-    pub color_g: u16,
-    pub color_b: u16,
+    pub color_r: Premul15,
+    pub color_g: Premul15,
+    pub color_b: Premul15,
     pub color_a: f32, // 0..1
     pub opaque: f32,
     pub hardness: f32,

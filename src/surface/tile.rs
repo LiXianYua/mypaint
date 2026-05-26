@@ -16,7 +16,7 @@ use crate::render::blend::{
     blend_dab_normal_eraser, blend_dab_normal_eraser_paint, blend_dab_normal_paint,
     blend_dab_posterize,
 };
-use crate::render::mask::{render_dab_mask, Coverage15, MaskBuffer, RleSkip};
+use crate::render::mask::{render_dab_mask, Coverage15, MaskBuffer, Premul15, RleEntry};
 use crate::smudge::rgb_to_spectral;
 use crate::symmetry::SymmetryData;
 use crate::util::rect::{Rect, Rectangles};
@@ -191,95 +191,85 @@ pub(crate) fn process_op(
     // Spectral 表示（仅当 paint > 0 时需要）
     let spectral_a: [f32; 10] = if op.paint > 0.0 {
         rgb_to_spectral(
-            op.color_r as f32 / one_scale,
-            op.color_g as f32 / one_scale,
-            op.color_b as f32 / one_scale,
+            op.color_r.raw() as f32 / one_scale,
+            op.color_g.raw() as f32 / one_scale,
+            op.color_b.raw() as f32 / one_scale,
         )
     } else {
         [0.0; 10]
     };
 
+    let color_r = op.color_r;
+    let color_g = op.color_g;
+    let color_b = op.color_b;
+    let color_a_premul = Premul15::from_unit_f32(op.color_a);
+
+    // 把 f32 0..=1 的 opacity 转 Coverage15。
+    let to_cov = |v: f32| Coverage15::new_saturating((v * one_scale) as u16);
+
     // Normal (non-paint) pass
     if op.paint < 1.0 {
         if op.normal > 0.0 {
-            let opacity = (op.normal * op.opaque * (1.0 - op.paint) * one_scale) as u16;
+            let opacity = to_cov(op.normal * op.opaque * (1.0 - op.paint));
             if op.color_a >= 1.0 {
-                blend_dab_normal(mask, rgba, op.color_r, op.color_g, op.color_b, opacity);
+                blend_dab_normal(mask, rgba, color_r, color_g, color_b, opacity);
             } else {
                 blend_dab_normal_eraser(
                     mask,
                     rgba,
-                    op.color_r,
-                    op.color_g,
-                    op.color_b,
-                    (op.color_a * one_scale) as u16,
+                    color_r,
+                    color_g,
+                    color_b,
+                    color_a_premul,
                     opacity,
                 );
             }
         }
         if op.lock_alpha > 0.0 && op.color_a != 0.0 {
-            let opacity = (op.lock_alpha
-                * op.opaque
-                * (1.0 - op.colorize)
-                * (1.0 - op.posterize)
-                * (1.0 - op.paint)
-                * one_scale) as u16;
-            blend_dab_lock_alpha(mask, rgba, op.color_r, op.color_g, op.color_b, opacity);
+            let opacity = to_cov(
+                op.lock_alpha
+                    * op.opaque
+                    * (1.0 - op.colorize)
+                    * (1.0 - op.posterize)
+                    * (1.0 - op.paint),
+            );
+            blend_dab_lock_alpha(mask, rgba, color_r, color_g, color_b, opacity);
         }
     }
 
     // Paint (spectral) pass
     if op.paint > 0.0 {
         if op.normal > 0.0 {
-            let opacity = (op.normal * op.opaque * op.paint * one_scale) as u16;
+            let opacity = to_cov(op.normal * op.opaque * op.paint);
             if op.color_a >= 1.0 {
-                blend_dab_normal_paint(
-                    mask,
-                    rgba,
-                    op.color_r,
-                    op.color_g,
-                    op.color_b,
-                    opacity,
-                    &spectral_a,
-                );
+                blend_dab_normal_paint(mask, rgba, color_r, color_g, color_b, opacity, &spectral_a);
             } else {
                 blend_dab_normal_eraser_paint(
                     mask,
                     rgba,
-                    op.color_r,
-                    op.color_g,
-                    op.color_b,
-                    (op.color_a * one_scale) as u16,
+                    color_r,
+                    color_g,
+                    color_b,
+                    color_a_premul,
                     opacity,
                     &spectral_a,
                 );
             }
         }
         if op.lock_alpha > 0.0 && op.color_a != 0.0 {
-            let opacity = (op.lock_alpha
-                * op.opaque
-                * (1.0 - op.colorize)
-                * (1.0 - op.posterize)
-                * op.paint
-                * one_scale) as u16;
-            blend_dab_lock_alpha_paint(
-                mask,
-                rgba,
-                op.color_r,
-                op.color_g,
-                op.color_b,
-                opacity,
-                &spectral_a,
+            let opacity = to_cov(
+                op.lock_alpha * op.opaque * (1.0 - op.colorize) * (1.0 - op.posterize) * op.paint,
             );
+            blend_dab_lock_alpha_paint(mask, rgba, color_r, color_g, color_b, opacity, &spectral_a);
         }
     }
 
     if op.colorize > 0.0 {
-        let opacity = (op.colorize * op.opaque * one_scale) as u16;
-        blend_dab_color(mask, rgba, op.color_r, op.color_g, op.color_b, opacity);
+        let opacity = to_cov(op.colorize * op.opaque);
+        blend_dab_color(mask, rgba, color_r, color_g, color_b, opacity);
     }
     if op.posterize > 0.0 {
-        let opacity = (op.posterize * op.opaque * one_scale) as u16;
+        let opacity = to_cov(op.posterize * op.opaque);
         blend_dab_posterize(mask, rgba, opacity, op.posterize_num);
     }
 }
@@ -324,9 +314,9 @@ impl Surface for TiledSurface {
             x: params.x,
             y: params.y,
             radius,
-            color_r: (params.color_r.clamp(0.0, 1.0) * SCALE as f32) as u16,
-            color_g: (params.color_g.clamp(0.0, 1.0) * SCALE as f32) as u16,
-            color_b: (params.color_b.clamp(0.0, 1.0) * SCALE as f32) as u16,
+            color_r: Premul15::from_unit_f32(params.color_r),
+            color_g: Premul15::from_unit_f32(params.color_g),
+            color_b: Premul15::from_unit_f32(params.color_b),
             color_a: params.alpha_eraser.clamp(0.0, 1.0),
             opaque,
             hardness,
@@ -494,17 +484,18 @@ fn accumulate_tile_color_rle(
         iter_rle_mask_get_color(mask, tile, |m, px| {
             let opa = m.raw() as u32;
             *sum_weight += m.raw() as f32 / SCALE as f32;
-            *sum_r += (opa * px[0] as u32 / SCALE) as f32;
-            *sum_g += (opa * px[1] as u32 / SCALE) as f32;
-            *sum_b += (opa * px[2] as u32 / SCALE) as f32;
-            *sum_a += (opa * px[3] as u32 / SCALE) as f32;
+            *sum_r += (opa * px[0].raw() as u32 / SCALE) as f32;
+            *sum_g += (opa * px[1].raw() as u32 / SCALE) as f32;
+            *sum_b += (opa * px[2].raw() as u32 / SCALE) as f32;
+            *sum_a += (opa * px[3].raw() as u32 / SCALE) as f32;
         });
         return;
     }
 
     // paint >= 0: 加性 RGB + 可选光谱混合
     iter_rle_mask_get_color(mask, tile, |m, px| {
-        let a = m.raw() as f32 * px[3] as f32 / ((1u32 << 30) as f32);
+        let px3 = px[3].raw() as f32;
+        let a = m.raw() as f32 * px3 / ((1u32 << 30) as f32);
         let alpha_sums = a + *sum_a;
         *sum_weight += m.raw() as f32 / SCALE as f32;
         let (fac_a, fac_b) = if alpha_sums > 0.0 {
@@ -513,46 +504,55 @@ fn accumulate_tile_color_rle(
         } else {
             (1.0, 1.0)
         };
-        if paint > 0.0 && px[3] > 0 {
+        if paint > 0.0 && px[3].raw() > 0 {
             let spectral = rgb_to_spectral(
-                px[0] as f32 / px[3] as f32,
-                px[1] as f32 / px[3] as f32,
-                px[2] as f32 / px[3] as f32,
+                px[0].raw() as f32 / px3,
+                px[1].raw() as f32 / px3,
+                px[2].raw() as f32 / px3,
             );
             for i in 0..10 {
                 avg_spectral[i] = spectral[i].powf(fac_a) * avg_spectral[i].powf(fac_b);
             }
         }
-        if paint < 1.0 && px[3] > 0 {
+        if paint < 1.0 && px[3].raw() > 0 {
             for i in 0..3 {
-                avg_rgb[i] = px[i] as f32 * fac_a / px[3] as f32 + avg_rgb[i] * fac_b;
+                avg_rgb[i] = px[i].raw() as f32 * fac_a / px3 + avg_rgb[i] * fac_b;
             }
         }
         *sum_a += a;
     });
 }
 
-/// 遍历 RLE mask 同步访问 tile RGBA。callback 收到 [`Coverage15`]，
-/// 杜绝把 RLE skip 当 coverage 误用。
+/// 遍历 RLE mask 同步访问 tile RGBA。callback 收到 [`Coverage15`] +
+/// `&[Premul15; 4]`，通过 type-system 杜绝把 RLE skip 当 coverage 用，
+/// 或把 mask coverage 写入像素 channel。
 #[inline]
-fn iter_rle_mask_get_color<F: FnMut(Coverage15, &[u16; 4])>(mask: &[u16], tile: &[u16], mut f: F) {
+fn iter_rle_mask_get_color<F: FnMut(Coverage15, &[Premul15; 4])>(
+    mask: &[u16],
+    tile: &[u16],
+    mut f: F,
+) {
     let mut mi: usize = 0;
     let mut ri: usize = 0;
     loop {
-        while mi < mask.len() && mask[mi] != 0 {
-            if ri + 4 > tile.len() {
-                return;
+        let (entry, width) = RleEntry::parse(mask, mi);
+        mi += width;
+        match entry {
+            RleEntry::Pixel(cov) => {
+                if ri + 4 > tile.len() {
+                    return;
+                }
+                // SAFETY: Premul15 is #[repr(transparent)] over u16,
+                // shared borrow only — read-only view into the tile slice.
+                let px: &[Premul15; 4] =
+                    unsafe { &*(tile[ri..ri + 4].as_ptr() as *const [Premul15; 4]) };
+                f(cov, px);
+                ri += 4;
             }
-            let px: &[u16; 4] = (&tile[ri..ri + 4]).try_into().unwrap();
-            f(Coverage15::from_raw(mask[mi]), px);
-            mi += 1;
-            ri += 4;
+            RleEntry::Skip(skip) => {
+                ri += skip.as_rgba_offset();
+            }
+            RleEntry::End => return,
         }
-        if mi + 1 >= mask.len() || mask[mi + 1] == 0 {
-            return;
-        }
-        let skip = RleSkip::from_raw(mask[mi + 1]);
-        ri += skip.as_rgba_offset();
-        mi += 2;
     }
 }

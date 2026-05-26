@@ -3,13 +3,15 @@
 //! 应用对应混合模式。
 //!
 //! Mask 格式（RLE）:
-//! - 连续非零 u16：对应像素的 opacity (0..32768)
-//! - 0 后跟一个 skip 计数（× 4，因 RGBA 步长）：跳过 N 个像素
+//! - 连续非零 u16：对应像素的 [`Coverage15`] (0..=32768)
+//! - 0 后跟一个 skip 计数 [`crate::render::mask::RleSkip`]（已 *4 步长）：跳过 N 个像素
 //! - 末尾 0,0 表示终止
 //!
 //! 像素格式: u16 RGBA premultiplied alpha, 范围 0..=2^15 (32768)。
+//! 用 [`Premul15`] 在 type-system 层面区分 premultiplied channel 和其他 u16
+//! 类型（mask coverage / RLE skip）。
 
-use crate::render::mask::{Coverage15, RleSkip};
+use crate::render::mask::{Coverage15, Premul15, RleEntry};
 use crate::smudge::{rgb_to_spectral, spectral_to_rgb};
 
 const SCALE: u32 = Coverage15::SCALE;
@@ -24,31 +26,45 @@ fn luma_u16(r: u16, g: u16, b: u16) -> i32 {
     (r as f32 * LUMA_RED + g as f32 * LUMA_GREEN + b as f32 * LUMA_BLUE) as i32
 }
 
-/// 遍历 RLE mask，对每个非零像素执行回调 `f(rgba_4channel_slice, coverage)`。
-/// callback 收到的 [`Coverage15`] 是 type-system 强制的 — 防止把 RLE skip
-/// length 误用为 coverage。
+/// 遍历 RLE mask，对每个非零像素执行回调 `f(rgba_4channel_pixel, coverage)`。
+///
+/// callback 收到的 `&mut [Premul15; 4]` 是 [`Premul15`] 的 layout-identical
+/// 视图（通过 `#[repr(transparent)]` 在 unsafe 内部 cast），强制 blend
+/// 代码用 `.raw()` 解包并通过 [`Premul15::from_scaled_u32`] 写回，避免
+/// 把 mask coverage / RLE skip / pixel channel 混用。
+///
+/// RLE 解码由 [`RleEntry::parse`] 在单一入口完成，杜绝把 skip 槽当
+/// coverage 读取（或反之）。
 #[inline]
-fn iter_rle_mask<F: FnMut(&mut [u16], Coverage15)>(mask: &[u16], rgba: &mut [u16], mut f: F) {
+fn iter_rle_mask<F: FnMut(&mut [Premul15; 4], Coverage15)>(
+    mask: &[u16],
+    rgba: &mut [u16],
+    mut f: F,
+) {
     let mut mi: usize = 0;
     let mut ri: usize = 0;
     loop {
-        // 处理连续非零段
-        while mi < mask.len() && mask[mi] != 0 {
-            let cov = Coverage15::from_raw(mask[mi]);
-            if ri + 4 > rgba.len() {
-                return;
+        let (entry, width) = RleEntry::parse(mask, mi);
+        mi += width;
+        match entry {
+            RleEntry::Pixel(cov) => {
+                if ri + 4 > rgba.len() {
+                    return;
+                }
+                // SAFETY: Premul15 is #[repr(transparent)] wrapper of u16,
+                // so &mut [u16; 4] and &mut [Premul15; 4] are layout-
+                // identical and aliasing-equivalent at this point (we hold
+                // exclusive access via &mut rgba).
+                let px: &mut [Premul15; 4] =
+                    unsafe { &mut *(rgba[ri..ri + 4].as_mut_ptr() as *mut [Premul15; 4]) };
+                f(px, cov);
+                ri += 4;
             }
-            f(&mut rgba[ri..ri + 4], cov);
-            mi += 1;
-            ri += 4;
+            RleEntry::Skip(skip) => {
+                ri += skip.as_rgba_offset();
+            }
+            RleEntry::End => return,
         }
-        // 遇到 0，检查后面是 skip 计数还是终止
-        if mi + 1 >= mask.len() || mask[mi + 1] == 0 {
-            return; // 终止符
-        }
-        let skip = RleSkip::from_raw(mask[mi + 1]);
-        ri += skip.as_rgba_offset();
-        mi += 2;
     }
 }
 
@@ -60,18 +76,22 @@ fn iter_rle_mask<F: FnMut(&mut [u16], Coverage15)>(mask: &[u16], rgba: &mut [u16
 pub fn blend_dab_normal(
     mask: &[u16],
     rgba: &mut [u16],
-    color_r: u16,
-    color_g: u16,
-    color_b: u16,
-    opacity: u16,
+    color_r: Premul15,
+    color_g: Premul15,
+    color_b: Premul15,
+    opacity: Coverage15,
 ) {
+    let color_r = color_r.raw() as u32;
+    let color_g = color_g.raw() as u32;
+    let color_b = color_b.raw() as u32;
+    let opacity = opacity.raw() as u32;
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
+        let opa_a = (m.raw() as u32 * opacity) / SCALE;
         let opa_b = SCALE - opa_a;
-        px[3] = (opa_a + opa_b * px[3] as u32 / SCALE) as u16;
-        px[0] = ((opa_a * color_r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
-        px[1] = ((opa_a * color_g as u32 + opa_b * px[1] as u32) / SCALE) as u16;
-        px[2] = ((opa_a * color_b as u32 + opa_b * px[2] as u32) / SCALE) as u16;
+        px[3] = Premul15::from_scaled_u32(opa_a + opa_b * px[3].raw() as u32 / SCALE);
+        px[0] = Premul15::from_scaled_u32((opa_a * color_r + opa_b * px[0].raw() as u32) / SCALE);
+        px[1] = Premul15::from_scaled_u32((opa_a * color_g + opa_b * px[1].raw() as u32) / SCALE);
+        px[2] = Premul15::from_scaled_u32((opa_a * color_b + opa_b * px[2].raw() as u32) / SCALE);
     });
 }
 
@@ -79,18 +99,22 @@ pub fn blend_dab_normal(
 pub fn blend_dab_lock_alpha(
     mask: &[u16],
     rgba: &mut [u16],
-    color_r: u16,
-    color_g: u16,
-    color_b: u16,
-    opacity: u16,
+    color_r: Premul15,
+    color_g: Premul15,
+    color_b: Premul15,
+    opacity: Coverage15,
 ) {
+    let color_r = color_r.raw() as u32;
+    let color_g = color_g.raw() as u32;
+    let color_b = color_b.raw() as u32;
+    let opacity = opacity.raw() as u32;
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a_top = (m.raw() as u32 * opacity as u32) / SCALE;
+        let opa_a_top = (m.raw() as u32 * opacity) / SCALE;
         let opa_b = SCALE - opa_a_top;
-        let opa_a = opa_a_top * px[3] as u32 / SCALE;
-        px[0] = ((opa_a * color_r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
-        px[1] = ((opa_a * color_g as u32 + opa_b * px[1] as u32) / SCALE) as u16;
-        px[2] = ((opa_a * color_b as u32 + opa_b * px[2] as u32) / SCALE) as u16;
+        let opa_a = opa_a_top * px[3].raw() as u32 / SCALE;
+        px[0] = Premul15::from_scaled_u32((opa_a * color_r + opa_b * px[0].raw() as u32) / SCALE);
+        px[1] = Premul15::from_scaled_u32((opa_a * color_g + opa_b * px[1].raw() as u32) / SCALE);
+        px[2] = Premul15::from_scaled_u32((opa_a * color_b + opa_b * px[2].raw() as u32) / SCALE);
     });
 }
 
@@ -98,20 +122,25 @@ pub fn blend_dab_lock_alpha(
 pub fn blend_dab_normal_eraser(
     mask: &[u16],
     rgba: &mut [u16],
-    color_r: u16,
-    color_g: u16,
-    color_b: u16,
-    color_a: u16,
-    opacity: u16,
+    color_r: Premul15,
+    color_g: Premul15,
+    color_b: Premul15,
+    color_a: Premul15,
+    opacity: Coverage15,
 ) {
+    let color_r = color_r.raw() as u32;
+    let color_g = color_g.raw() as u32;
+    let color_b = color_b.raw() as u32;
+    let color_a = color_a.raw() as u32;
+    let opacity = opacity.raw() as u32;
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a_raw = (m.raw() as u32 * opacity as u32) / SCALE;
+        let opa_a_raw = (m.raw() as u32 * opacity) / SCALE;
         let opa_b = SCALE - opa_a_raw;
-        let opa_a = opa_a_raw * color_a as u32 / SCALE;
-        px[3] = (opa_a + opa_b * px[3] as u32 / SCALE) as u16;
-        px[0] = ((opa_a * color_r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
-        px[1] = ((opa_a * color_g as u32 + opa_b * px[1] as u32) / SCALE) as u16;
-        px[2] = ((opa_a * color_b as u32 + opa_b * px[2] as u32) / SCALE) as u16;
+        let opa_a = opa_a_raw * color_a / SCALE;
+        px[3] = Premul15::from_scaled_u32(opa_a + opa_b * px[3].raw() as u32 / SCALE);
+        px[0] = Premul15::from_scaled_u32((opa_a * color_r + opa_b * px[0].raw() as u32) / SCALE);
+        px[1] = Premul15::from_scaled_u32((opa_a * color_g + opa_b * px[1].raw() as u32) / SCALE);
+        px[2] = Premul15::from_scaled_u32((opa_a * color_b + opa_b * px[2].raw() as u32) / SCALE);
     });
 }
 
@@ -154,49 +183,66 @@ fn set_rgb16_lum_from_rgb16(
 pub fn blend_dab_color(
     mask: &[u16],
     rgba: &mut [u16],
-    color_r: u16,
-    color_g: u16,
-    color_b: u16,
-    opacity: u16,
+    color_r: Premul15,
+    color_g: Premul15,
+    color_b: Premul15,
+    opacity: Coverage15,
 ) {
+    let color_r_raw = color_r.raw();
+    let color_g_raw = color_g.raw();
+    let color_b_raw = color_b.raw();
+    let opacity = opacity.raw() as u32;
     iter_rle_mask(mask, rgba, |px, m| {
-        let a = px[3];
+        let a = px[3].raw();
         let (mut r, mut g, mut b) = (0u16, 0u16, 0u16);
         if a != 0 {
-            r = ((SCALE * px[0] as u32) / a as u32) as u16;
-            g = ((SCALE * px[1] as u32) / a as u32) as u16;
-            b = ((SCALE * px[2] as u32) / a as u32) as u16;
+            r = ((SCALE * px[0].raw() as u32) / a as u32) as u16;
+            g = ((SCALE * px[1].raw() as u32) / a as u32) as u16;
+            b = ((SCALE * px[2].raw() as u32) / a as u32) as u16;
         }
-        set_rgb16_lum_from_rgb16(color_r, color_g, color_b, &mut r, &mut g, &mut b);
+        set_rgb16_lum_from_rgb16(
+            color_r_raw,
+            color_g_raw,
+            color_b_raw,
+            &mut r,
+            &mut g,
+            &mut b,
+        );
         r = ((r as u32 * a as u32) / SCALE) as u16;
         g = ((g as u32 * a as u32) / SCALE) as u16;
         b = ((b as u32 * a as u32) / SCALE) as u16;
-        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
+        let opa_a = (m.raw() as u32 * opacity) / SCALE;
         let opa_b = SCALE - opa_a;
-        px[0] = ((opa_a * r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
-        px[1] = ((opa_a * g as u32 + opa_b * px[1] as u32) / SCALE) as u16;
-        px[2] = ((opa_a * b as u32 + opa_b * px[2] as u32) / SCALE) as u16;
+        px[0] = Premul15::from_scaled_u32((opa_a * r as u32 + opa_b * px[0].raw() as u32) / SCALE);
+        px[1] = Premul15::from_scaled_u32((opa_a * g as u32 + opa_b * px[1].raw() as u32) / SCALE);
+        px[2] = Premul15::from_scaled_u32((opa_a * b as u32 + opa_b * px[2].raw() as u32) / SCALE);
     });
 }
 
 /// 对应 draw_dab_pixels_BlendMode_Posterize。`opacity` 已包含 opaque/mask 调制。
-pub fn blend_dab_posterize(mask: &[u16], rgba: &mut [u16], opacity: u16, posterize_num: u16) {
+pub fn blend_dab_posterize(
+    mask: &[u16],
+    rgba: &mut [u16],
+    opacity: Coverage15,
+    posterize_num: u16,
+) {
     let pn = posterize_num as f32;
     if pn == 0.0 {
         return;
     }
+    let opacity = opacity.raw() as u32;
     iter_rle_mask(mask, rgba, |px, m| {
-        let r = px[0] as f32 / SCALE as f32;
-        let g = px[1] as f32 / SCALE as f32;
-        let b = px[2] as f32 / SCALE as f32;
+        let r = px[0].raw() as f32 / SCALE as f32;
+        let g = px[1].raw() as f32 / SCALE as f32;
+        let b = px[2].raw() as f32 / SCALE as f32;
         let post_r = (SCALE as f32 * (r * pn).round() / pn) as u32;
         let post_g = (SCALE as f32 * (g * pn).round() / pn) as u32;
         let post_b = (SCALE as f32 * (b * pn).round() / pn) as u32;
-        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
+        let opa_a = (m.raw() as u32 * opacity) / SCALE;
         let opa_b = SCALE - opa_a;
-        px[0] = ((opa_a * post_r + opa_b * px[0] as u32) / SCALE) as u16;
-        px[1] = ((opa_a * post_g + opa_b * px[1] as u32) / SCALE) as u16;
-        px[2] = ((opa_a * post_b + opa_b * px[2] as u32) / SCALE) as u16;
+        px[0] = Premul15::from_scaled_u32((opa_a * post_r + opa_b * px[0].raw() as u32) / SCALE);
+        px[1] = Premul15::from_scaled_u32((opa_a * post_g + opa_b * px[1].raw() as u32) / SCALE);
+        px[2] = Premul15::from_scaled_u32((opa_a * post_b + opa_b * px[2].raw() as u32) / SCALE);
     });
 }
 
@@ -214,43 +260,50 @@ fn spectral_blend_factor(x: f32) -> f32 {
 }
 
 /// 对应 draw_dab_pixels_BlendMode_Normal_and_Eraser_Paint。
+#[allow(clippy::too_many_arguments)]
 pub fn blend_dab_normal_eraser_paint(
     mask: &[u16],
     rgba: &mut [u16],
-    color_r: u16,
-    color_g: u16,
-    color_b: u16,
-    color_a: u16,
-    opacity: u16,
+    color_r: Premul15,
+    color_g: Premul15,
+    color_b: Premul15,
+    color_a: Premul15,
+    opacity: Coverage15,
     spectral_a: &[f32; 10],
 ) {
-    let opacity = opacity.max(150);
+    let color_r = color_r.raw() as u32;
+    let color_g = color_g.raw() as u32;
+    let color_b = color_b.raw() as u32;
+    let color_a_raw = color_a.raw() as u32;
+    let opacity = opacity.raw().max(150) as u32;
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a = (m.raw() as u32 * opacity as u32) / SCALE;
+        let px3 = px[3].raw() as u32;
+        let opa_a = (m.raw() as u32 * opacity) / SCALE;
         let opa_b = SCALE - opa_a;
-        let opa_a2 = opa_a * color_a as u32 / SCALE;
-        let opa_out = opa_a2 + opa_b * px[3] as u32 / SCALE;
+        let opa_a2 = opa_a * color_a_raw / SCALE;
+        let opa_out = opa_a2 + opa_b * px3 / SCALE;
         let mut rgb = [0u32; 3];
-        let spectral_factor = spectral_blend_factor(px[3] as f32 / SCALE as f32).clamp(0.0, 1.0);
+        let spectral_factor = spectral_blend_factor(px3 as f32 / SCALE as f32).clamp(0.0, 1.0);
         let additive_factor = 1.0 - spectral_factor;
         if additive_factor != 0.0 {
-            rgb[0] = (opa_a2 * color_r as u32 + opa_b * px[0] as u32) / SCALE;
-            rgb[1] = (opa_a2 * color_g as u32 + opa_b * px[1] as u32) / SCALE;
-            rgb[2] = (opa_a2 * color_b as u32 + opa_b * px[2] as u32) / SCALE;
+            rgb[0] = (opa_a2 * color_r + opa_b * px[0].raw() as u32) / SCALE;
+            rgb[1] = (opa_a2 * color_g + opa_b * px[1].raw() as u32) / SCALE;
+            rgb[2] = (opa_a2 * color_b + opa_b * px[2].raw() as u32) / SCALE;
         }
-        if spectral_factor != 0.0 && px[3] != 0 {
+        if spectral_factor != 0.0 && px3 != 0 {
+            let px3f = px3 as f32;
             let spectral_b = rgb_to_spectral(
-                px[0] as f32 / px[3] as f32,
-                px[1] as f32 / px[3] as f32,
-                px[2] as f32 / px[3] as f32,
+                px[0].raw() as f32 / px3f,
+                px[1].raw() as f32 / px3f,
+                px[2].raw() as f32 / px3f,
             );
-            let denom = opa_a as f32 + opa_b as f32 * px[3] as f32 / SCALE as f32;
+            let denom = opa_a as f32 + opa_b as f32 * px3f / SCALE as f32;
             let mut fac_a = if denom > 0.0 {
                 opa_a as f32 / denom
             } else {
                 0.0
             };
-            fac_a *= color_a as f32 / SCALE as f32;
+            fac_a *= color_a_raw as f32 / SCALE as f32;
             let fac_b = 1.0 - fac_a;
             let mut sr_arr = [0.0f32; 10];
             for i in 0..10 {
@@ -264,10 +317,10 @@ pub fn blend_dab_normal_eraser_paint(
             rgb[2] =
                 (additive_factor * rgb[2] as f32 + spectral_factor * sb * opa_out as f32) as u32;
         }
-        px[3] = opa_out as u16;
-        px[0] = rgb[0] as u16;
-        px[1] = rgb[1] as u16;
-        px[2] = rgb[2] as u16;
+        px[3] = Premul15::from_scaled_u32(opa_out);
+        px[0] = Premul15::from_scaled_u32(rgb[0]);
+        px[1] = Premul15::from_scaled_u32(rgb[1]);
+        px[2] = Premul15::from_scaled_u32(rgb[2]);
     });
 }
 
@@ -275,10 +328,10 @@ pub fn blend_dab_normal_eraser_paint(
 pub fn blend_dab_normal_paint(
     mask: &[u16],
     rgba: &mut [u16],
-    color_r: u16,
-    color_g: u16,
-    color_b: u16,
-    opacity: u16,
+    color_r: Premul15,
+    color_g: Premul15,
+    color_b: Premul15,
+    opacity: Coverage15,
     spectral_a: &[f32; 10],
 ) {
     blend_dab_normal_eraser_paint(
@@ -287,7 +340,7 @@ pub fn blend_dab_normal_paint(
         color_r,
         color_g,
         color_b,
-        SCALE as u16,
+        Premul15::FULL,
         opacity,
         spectral_a,
     );
@@ -297,24 +350,32 @@ pub fn blend_dab_normal_paint(
 pub fn blend_dab_lock_alpha_paint(
     mask: &[u16],
     rgba: &mut [u16],
-    color_r: u16,
-    color_g: u16,
-    color_b: u16,
-    opacity: u16,
+    color_r: Premul15,
+    color_g: Premul15,
+    color_b: Premul15,
+    opacity: Coverage15,
     spectral_a: &[f32; 10],
 ) {
-    let opacity = opacity.max(150);
+    let color_r = color_r.raw() as u32;
+    let color_g = color_g.raw() as u32;
+    let color_b = color_b.raw() as u32;
+    let opacity = opacity.raw().max(150) as u32;
     iter_rle_mask(mask, rgba, |px, m| {
-        let opa_a_raw = (m.raw() as u32 * opacity as u32) / SCALE;
+        let px3 = px[3].raw() as u32;
+        let opa_a_raw = (m.raw() as u32 * opacity) / SCALE;
         let opa_b = SCALE - opa_a_raw;
-        let opa_a = opa_a_raw * px[3] as u32 / SCALE;
-        if px[3] == 0 {
-            px[0] = ((opa_a * color_r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
-            px[1] = ((opa_a * color_g as u32 + opa_b * px[1] as u32) / SCALE) as u16;
-            px[2] = ((opa_a * color_b as u32 + opa_b * px[2] as u32) / SCALE) as u16;
+        let opa_a = opa_a_raw * px3 / SCALE;
+        if px3 == 0 {
+            px[0] =
+                Premul15::from_scaled_u32((opa_a * color_r + opa_b * px[0].raw() as u32) / SCALE);
+            px[1] =
+                Premul15::from_scaled_u32((opa_a * color_g + opa_b * px[1].raw() as u32) / SCALE);
+            px[2] =
+                Premul15::from_scaled_u32((opa_a * color_b + opa_b * px[2].raw() as u32) / SCALE);
             return;
         }
-        let denom = opa_a as f32 + opa_b as f32 * px[3] as f32 / SCALE as f32;
+        let px3f = px3 as f32;
+        let denom = opa_a as f32 + opa_b as f32 * px3f / SCALE as f32;
         let fac_a = if denom > 0.0 {
             opa_a as f32 / denom
         } else {
@@ -322,18 +383,18 @@ pub fn blend_dab_lock_alpha_paint(
         };
         let fac_b = 1.0 - fac_a;
         let spectral_b = rgb_to_spectral(
-            px[0] as f32 / px[3] as f32,
-            px[1] as f32 / px[3] as f32,
-            px[2] as f32 / px[3] as f32,
+            px[0].raw() as f32 / px3f,
+            px[1].raw() as f32 / px3f,
+            px[2].raw() as f32 / px3f,
         );
         let mut sr_arr = [0.0f32; 10];
         for i in 0..10 {
             sr_arr[i] = spectral_a[i].powf(fac_a) * spectral_b[i].powf(fac_b);
         }
         let (sr, sg, sb) = spectral_to_rgb(&sr_arr);
-        px[0] = (sr * px[3] as f32 + 0.5) as u16;
-        px[1] = (sg * px[3] as f32 + 0.5) as u16;
-        px[2] = (sb * px[3] as f32 + 0.5) as u16;
+        px[0] = Premul15::from_scaled_u32((sr * px3f + 0.5) as u32);
+        px[1] = Premul15::from_scaled_u32((sg * px3f + 0.5) as u32);
+        px[2] = Premul15::from_scaled_u32((sb * px3f + 0.5) as u32);
     });
 }
 
@@ -365,7 +426,6 @@ mod tests {
         iter_rle_mask(&mask, &mut rgba, |px, _| {
             indices.push(ptr);
             ptr += 1;
-            // 我们不知道 px 的实际偏移，但能数到两次回调
             let _ = px;
         });
         assert_eq!(indices.len(), 2);
@@ -376,8 +436,39 @@ mod tests {
         // 单像素，full mask + opacity
         let mask = vec![SCALE as u16, 0, 0];
         let mut rgba = vec![0u16; 4];
-        blend_dab_normal(&mask, &mut rgba, SCALE as u16, 0, 0, SCALE as u16);
+        blend_dab_normal(
+            &mask,
+            &mut rgba,
+            Premul15::FULL,
+            Premul15::ZERO,
+            Premul15::ZERO,
+            Coverage15::FULL,
+        );
         assert_eq!(rgba[0], SCALE as u16);
         assert_eq!(rgba[3], SCALE as u16);
+    }
+
+    #[test]
+    fn rle_entry_parse_pixel() {
+        let buf = [42u16, 0, 0];
+        let (e, w) = RleEntry::parse(&buf, 0);
+        assert!(matches!(e, RleEntry::Pixel(_)));
+        assert_eq!(w, 1);
+    }
+
+    #[test]
+    fn rle_entry_parse_skip() {
+        let buf = [0u16, 8, 42, 0, 0];
+        let (e, w) = RleEntry::parse(&buf, 0);
+        assert!(matches!(e, RleEntry::Skip(_)));
+        assert_eq!(w, 2);
+    }
+
+    #[test]
+    fn rle_entry_parse_end() {
+        let buf = [0u16, 0];
+        let (e, w) = RleEntry::parse(&buf, 0);
+        assert!(matches!(e, RleEntry::End));
+        assert_eq!(w, 0);
     }
 }
