@@ -22,24 +22,28 @@ const SMUDGE_BUCKET_SIZE: usize = 9;
 
 /// The MyPaint brush engine.
 pub struct Brush {
-    settings: [BrushSettingData; NUM_SETTINGS],
-    pub state: BrushState,
-    smudge_buckets: Option<Vec<[f32; SMUDGE_BUCKET_SIZE]>>,
-    rng: RngDouble,
-    print_inputs: bool,
-    stroke_total_painting_time: f64,
-    stroke_current_idling_time: f64,
-    reset_requested: bool,
-    skip: f32,
-    skip_last_x: f32,
-    skip_last_y: f32,
-    skipped_dtime: f32,
-    random_input: f64,
-    speed_mapping_gamma: [f32; 2],
-    speed_mapping_m: [f32; 2],
-    speed_mapping_q: [f32; 2],
+    pub(crate) settings: [BrushSettingData; NUM_SETTINGS],
+    pub(crate) state: BrushState,
+    /// Optional 256-bucket smudge state. None / empty → use `inline_bucket`.
+    pub(crate) smudge_buckets: Option<Vec<[f32; SMUDGE_BUCKET_SIZE]>>,
+    /// Fallback bucket used when no buckets are configured. Mirrors how C
+    /// uses STATE(SMUDGE_RA..PREV_COL_RECENTNESS) as a default bucket.
+    pub(crate) inline_bucket: [f32; SMUDGE_BUCKET_SIZE],
+    pub(crate) rng: RngDouble,
+    pub(crate) print_inputs: bool,
+    pub(crate) stroke_total_painting_time: f64,
+    pub(crate) stroke_current_idling_time: f64,
+    pub(crate) reset_requested: bool,
+    pub(crate) skip: f32,
+    pub(crate) skip_last_x: f32,
+    pub(crate) skip_last_y: f32,
+    pub(crate) skipped_dtime: f32,
+    pub(crate) random_input: f64,
+    pub(crate) speed_mapping_gamma: [f32; 2],
+    pub(crate) speed_mapping_m: [f32; 2],
+    pub(crate) speed_mapping_q: [f32; 2],
     /// Pre-computed setting values for the current stroke step.
-    settings_value: [f32; NUM_SETTINGS],
+    pub(crate) settings_value: [f32; NUM_SETTINGS],
 }
 
 impl Brush {
@@ -56,6 +60,7 @@ impl Brush {
             } else {
                 None
             },
+            inline_bucket: [0.0; SMUDGE_BUCKET_SIZE],
             rng: RngDouble::new(1000),
             print_inputs: false,
             stroke_total_painting_time: 0.0,
@@ -77,7 +82,7 @@ impl Brush {
         brush
     }
 
-    fn brush_reset(&mut self) {
+    pub(crate) fn brush_reset(&mut self) {
         self.skip = 0.0;
         self.skip_last_x = 0.0;
         self.skip_last_y = 0.0;
@@ -89,6 +94,7 @@ impl Brush {
                 *b = [0.0; SMUDGE_BUCKET_SIZE];
             }
         }
+        self.inline_bucket = [0.0; SMUDGE_BUCKET_SIZE];
     }
 
     fn settings_base_values_have_changed(&mut self) {

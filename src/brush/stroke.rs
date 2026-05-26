@@ -39,33 +39,40 @@ const SMUDGE_BUCKET_SIZE: usize = 9;
 
 struct Offsets { x: f32, y: f32 }
 
-/// Macro-like helper: setting base value (used during update_states for BASEVAL).
+/// Macro-like helper: setting base value (对应 C 的 BASEVAL 宏)。
 #[inline]
 fn baseval(brush: &Brush, id: BrushSetting) -> f32 {
     brush.settings[id as usize].base_value()
 }
 
+/// Macro-like helper: dynamic setting value (对应 C 的 SETTING 宏，从 settings_value[] 读取)。
+#[inline]
+fn setting(brush: &Brush, id: BrushSetting) -> f32 {
+    brush.settings_value[id as usize]
+}
+
 impl Brush {
     // =========================================================================
     // directional_offsets — mypaint-brush.c:586-664
+    // 全部使用 SETTING（settings_value），不是 BASEVAL
     // =========================================================================
 
     fn directional_offsets(&self, base_radius: f32, brush_flip: i32) -> Offsets {
-        let offset_mult = baseval(self, BrushSetting::OffsetMultiplier).exp();
+        let offset_mult = setting(self, BrushSetting::OffsetMultiplier).exp();
         if !offset_mult.is_finite() {
             return Offsets { x: 0.0, y: 0.0 };
         }
 
-        let mut dx = baseval(self, BrushSetting::OffsetX);
-        let mut dy = baseval(self, BrushSetting::OffsetY);
+        let mut dx = setting(self, BrushSetting::OffsetX);
+        let mut dy = setting(self, BrushSetting::OffsetY);
 
-        let offset_angle_adj = baseval(self, BrushSetting::OffsetAngleAdj);
+        let offset_angle_adj = setting(self, BrushSetting::OffsetAngleAdj);
         let dir_angle_dy = self.state.direction_angle_dy;
         let dir_angle_dx = self.state.direction_angle_dx;
         let angle_deg = ((dir_angle_dy.atan2(dir_angle_dx)).to_degrees() - 90.0) % 360.0;
 
         // offset to one side of direction
-        let offset_angle = baseval(self, BrushSetting::OffsetAngle);
+        let offset_angle = setting(self, BrushSetting::OffsetAngle);
         if offset_angle != 0.0 {
             let dir_angle = (angle_deg + offset_angle_adj).to_radians();
             dx += dir_angle.cos() * offset_angle;
@@ -74,7 +81,7 @@ impl Brush {
 
         // offset to one side of ascension angle
         let view_rotation = self.state.viewrotation;
-        let offset_angle_asc = baseval(self, BrushSetting::OffsetAngleAsc);
+        let offset_angle_asc = setting(self, BrushSetting::OffsetAngleAsc);
         if offset_angle_asc != 0.0 {
             let ascension = self.state.ascension;
             let asc_angle = (ascension - view_rotation + offset_angle_adj).to_radians();
@@ -83,7 +90,7 @@ impl Brush {
         }
 
         // offset to one side of view orientation
-        let view_offset = baseval(self, BrushSetting::OffsetAngleView);
+        let view_offset = setting(self, BrushSetting::OffsetAngleView);
         if view_offset != 0.0 {
             let view_angle = (view_rotation + offset_angle_adj).to_radians();
             dx += (-view_angle).cos() * view_offset;
@@ -91,7 +98,7 @@ impl Brush {
         }
 
         // offset mirrored to sides of direction
-        let offset_dir_mirror = 0.0f32.max(baseval(self, BrushSetting::OffsetAngle2));
+        let offset_dir_mirror = 0.0f32.max(setting(self, BrushSetting::OffsetAngle2));
         if offset_dir_mirror != 0.0 {
             let dir_mirror_angle = (angle_deg + offset_angle_adj * brush_flip as f32).to_radians();
             let offset_factor = offset_dir_mirror * brush_flip as f32;
@@ -100,7 +107,7 @@ impl Brush {
         }
 
         // offset mirrored to sides of ascension angle
-        let offset_asc_mirror = 0.0f32.max(baseval(self, BrushSetting::OffsetAngle2Asc));
+        let offset_asc_mirror = 0.0f32.max(setting(self, BrushSetting::OffsetAngle2Asc));
         if offset_asc_mirror != 0.0 {
             let ascension = self.state.ascension;
             let asc_angle = (ascension - view_rotation + offset_angle_adj * brush_flip as f32).to_radians();
@@ -110,7 +117,7 @@ impl Brush {
         }
 
         // offset mirrored to sides of view orientation
-        let offset_view_mirror = 0.0f32.max(baseval(self, BrushSetting::OffsetAngle2View));
+        let offset_view_mirror = 0.0f32.max(setting(self, BrushSetting::OffsetAngle2View));
         if offset_view_mirror != 0.0 {
             let offset_factor = brush_flip as f32 * offset_view_mirror;
             let offset_angle_rad = (view_rotation + offset_angle_adj).to_radians();
@@ -156,13 +163,14 @@ impl Brush {
         let viewrotation = mod_arith(step_viewrotation.to_degrees() + 180.0, 360.0) - 180.0;
         self.state.viewrotation = viewrotation;
 
-        // Gridmap state update
+        // Gridmap state update — 使用 SETTING (settings_value 来自上一步 update_states)
+        // 对应 mypaint-brush.c:732-746
         {
             let x = self.state.actual_x;
             let y = self.state.actual_y;
-            let scale = baseval(self, BrushSetting::GridmapScale).exp();
-            let scale_x = baseval(self, BrushSetting::GridmapScaleX);
-            let scale_y = baseval(self, BrushSetting::GridmapScaleY);
+            let scale = setting(self, BrushSetting::GridmapScale).exp();
+            let scale_x = setting(self, BrushSetting::GridmapScaleX);
+            let scale_y = setting(self, BrushSetting::GridmapScaleY);
             let scaled_size = scale * GRID_SIZE;
             self.state.gridmap_x = mod_arith((x * scale_x).abs(), scaled_size) / scaled_size * GRID_SIZE;
             self.state.gridmap_y = mod_arith((y * scale_y).abs(), scaled_size) / scaled_size * GRID_SIZE;
@@ -354,23 +362,31 @@ impl Brush {
 
     // =========================================================================
     // fetch_smudge_bucket — mypaint-brush.c:906-918
+    // 无桶配置时回退到 inline_bucket（等价于 C 的 STATE(SMUDGE_RA) 默认行为）
     // =========================================================================
 
-    fn fetch_smudge_bucket(&mut self) -> &mut [f32; SMUDGE_BUCKET_SIZE] {
-        if self.smudge_buckets.is_none() || self.smudge_buckets.as_ref().unwrap().is_empty() {
-            // Return a reference into state — we use the smudge_ra/ga/ba/a fields
-            // Since we can't return a ref to state fields as a [f32;9] easily,
-            // we handle this differently in Rust.
-            // For now, use a transient approach: we'll work with the state directly.
-            // This is a known difference from the C version.
-            unimplemented!("smudge_buckets without buckets — use state fields directly");
+    fn fetch_smudge_bucket_mut(&mut self) -> &mut [f32; SMUDGE_BUCKET_SIZE] {
+        let has_buckets = self.smudge_buckets.as_ref().is_some_and(|b| !b.is_empty());
+        if !has_buckets {
+            return &mut self.inline_bucket;
         }
-        let bucket_index = (self.settings_value[BrushSetting::SmudgeBucket as usize])
-            .round().clamp(0.0, self.smudge_buckets.as_ref().unwrap().len() as f32 - 1.0) as usize;
         let buckets = self.smudge_buckets.as_mut().unwrap();
-        if self.state.smudge_ra == 0.0 { /* init min/max tracking */ }
-        // We don't track min/max used in Rust version (optimization only)
+        let bucket_index = self.settings_value[BrushSetting::SmudgeBucket as usize]
+            .round()
+            .clamp(0.0, buckets.len() as f32 - 1.0) as usize;
         &mut buckets[bucket_index]
+    }
+
+    fn fetch_smudge_bucket_ref(&self) -> &[f32; SMUDGE_BUCKET_SIZE] {
+        let has_buckets = self.smudge_buckets.as_ref().is_some_and(|b| !b.is_empty());
+        if !has_buckets {
+            return &self.inline_bucket;
+        }
+        let buckets = self.smudge_buckets.as_ref().unwrap();
+        let bucket_index = self.settings_value[BrushSetting::SmudgeBucket as usize]
+            .round()
+            .clamp(0.0, buckets.len() as f32 - 1.0) as usize;
+        &buckets[bucket_index]
     }
 
     // =========================================================================
@@ -468,23 +484,21 @@ impl Brush {
 
         // update smudge color
         let smudge_length = self.settings_value[BrushSetting::SmudgeLength as usize];
-        let has_buckets = self.smudge_buckets.as_ref().map_or(false, |b| !b.is_empty());
         if smudge_length < 1.0 && (
             self.settings_value[BrushSetting::Smudge as usize] != 0.0
             || !self.settings[BrushSetting::Smudge as usize].mapping().is_constant()
         ) {
-            if !has_buckets {
-                return false;
-            }
-            let bucket_index = self.settings_value[BrushSetting::SmudgeBucket as usize]
-                .round().clamp(0.0, self.smudge_buckets.as_ref().unwrap().len() as f32 - 1.0) as usize;
-            let return_early = update_smudge_color_fn(
-                surface, &mut self.smudge_buckets.as_mut().unwrap()[bucket_index],
-                smudge_length, self.settings_value[BrushSetting::SmudgeLengthLog as usize],
-                self.settings_value[BrushSetting::SmudgeRadiusLog as usize],
-                self.settings_value[BrushSetting::SmudgeTransparency as usize],
-                x.round() as i32, y.round() as i32, radius,
-                legacy_smudge, paint_factor);
+            let smudge_length_log = self.settings_value[BrushSetting::SmudgeLengthLog as usize];
+            let smudge_radius_log = self.settings_value[BrushSetting::SmudgeRadiusLog as usize];
+            let smudge_op_lim = self.settings_value[BrushSetting::SmudgeTransparency as usize];
+            let return_early = {
+                let bucket = self.fetch_smudge_bucket_mut();
+                update_smudge_color_fn(
+                    surface, bucket,
+                    smudge_length, smudge_length_log, smudge_radius_log, smudge_op_lim,
+                    x.round() as i32, y.round() as i32, radius,
+                    legacy_smudge, paint_factor)
+            };
             if return_early {
                 return false;
             }
@@ -493,14 +507,9 @@ impl Brush {
         let mut eraser_target_alpha = 1.0;
         let smudge_value = self.settings_value[BrushSetting::Smudge as usize];
         if smudge_value > 0.0 {
-            if !has_buckets {
-                return false;
-            }
-            let bucket_index = self.settings_value[BrushSetting::SmudgeBucket as usize]
-                .round().clamp(0.0, self.smudge_buckets.as_ref().unwrap().len() as f32 - 1.0) as usize;
-            let bucket = &self.smudge_buckets.as_ref().unwrap()[bucket_index];
+            let bucket_copy = *self.fetch_smudge_bucket_ref();
             eraser_target_alpha = apply_smudge_fn(
-                bucket, smudge_value, legacy_smudge, paint_factor,
+                &bucket_copy, smudge_value, legacy_smudge, paint_factor,
                 &mut color_h, &mut color_s, &mut color_v);
         }
 
@@ -711,73 +720,31 @@ impl Brush {
             self.skipped_dtime = 0.0;
         }
 
-        // Calculate actual "virtual" cursor position
-        {
-            let tracking_noise = baseval(self, BrushSetting::TrackingNoise);
-            if tracking_noise != 0.0 {
-                let base_radius = baseval(self, BrushSetting::RadiusLogarithmic).exp();
-                let noise = base_radius * tracking_noise;
-                if noise > 0.001 {
-                    self.skip = 0.5 * noise;
-                    self.skip_last_x = x;
-                    self.skip_last_y = y;
-                    let mut x = x;
-                    let mut y = y;
-                    x += rand_gauss(&mut self.rng) * noise;
-                    y += rand_gauss(&mut self.rng) * noise;
-                    // Note: x, y are shadowed here — need to re-assign
-                    // In C, these modify the local vars directly.
-                    // In Rust, we need to store them back.
-                    // For simplicity, handle this in the slow_tracking section below.
-                    self.state.x += (x - self.state.x) * 0.0; // placeholder
-                    self.state.y += (y - self.state.y) * 0.0;
-                    // Actually the noise is added before slow_tracking fac below.
-                    // We'll handle this correctly:
-                    let x_noisy = x + rand_gauss(&mut self.rng) * noise;
-                    let y_noisy = y + rand_gauss(&mut self.rng) * noise;
-                    let fac = 1.0 - Self::exp_decay(
-                        baseval(self, BrushSetting::SlowTracking), 100.0 * dtime as f32);
-                    self.state.x = self.state.x + (x_noisy - self.state.x) * fac;
-                    self.state.y = self.state.y + (y_noisy - self.state.y) * fac;
-                    // After this block, we skip the normal slow_tracking below.
-                    // But actually the C code does noise first, THEN slow_tracking.
-                    // Let me redo this correctly.
-                }
-            }
-        }
-
-        // Actually, let me redo the tracking logic to match C exactly:
-        // The C code does: noise → add to x,y → slow_tracking fac.
-        // My impl above has issues with variable shadowing. Let me rewrite cleanly:
-
-        // Reset tracking state
+        // Calculate the actual "virtual" cursor position.
+        // 对应 mypaint-brush.c:1372-1396 — noise 后 slow_tracking。
+        // 仅修改本地变量，state.x/state.y 由 update_states 经 step_dx 累加更新。
         let mut effective_x = x;
         let mut effective_y = y;
 
-        // noise
-        {
+        // tracking noise
+        if baseval(self, BrushSetting::TrackingNoise) != 0.0 {
             let base_radius = baseval(self, BrushSetting::RadiusLogarithmic).exp();
-            let noise_val = base_radius * baseval(self, BrushSetting::TrackingNoise);
-            if noise_val > 0.001 {
-                self.skip = 0.5 * noise_val;
+            let noise = base_radius * baseval(self, BrushSetting::TrackingNoise);
+            if noise > 0.001 {
+                self.skip = 0.5 * noise;
                 self.skip_last_x = x;
                 self.skip_last_y = y;
-                effective_x += rand_gauss(&mut self.rng) * noise_val;
-                effective_y += rand_gauss(&mut self.rng) * noise_val;
+                effective_x += rand_gauss(&mut self.rng) * noise;
+                effective_y += rand_gauss(&mut self.rng) * noise;
             }
         }
 
-        // slow_tracking fac — modifies the LOCAL cursor position, not state.x/state.y
-        // The C code modifies local variables x, y here. state.x is updated in update_states.
+        // slow_tracking fac — 仅修改局部 filtered_x/y，不写 state.x/state.y
         let fac = 1.0 - Self::exp_decay(
             baseval(self, BrushSetting::SlowTracking),
             100.0 * dtime as f32);
-        let filtered_x = self.state.x + (effective_x - self.state.x) * fac;
-        let filtered_y = self.state.y + (effective_y - self.state.y) * fac;
-
-        // Save the input position for count_dabs (C code passes filtered x, y)
-        let input_x = filtered_x;
-        let input_y = filtered_y;
+        let input_x = self.state.x + (effective_x - self.state.x) * fac;
+        let input_y = self.state.y + (effective_y - self.state.y) * fac;
 
         // reset or time jump
         if dtime > (max_dtime as f64) || self.reset_requested {
@@ -933,13 +900,20 @@ fn update_smudge_color_fn(
     px: i32, py: i32, radius: f32,
     legacy_smudge: bool, paint_factor: f32,
 ) -> bool {
-    let update_factor = 0.01f32.max(smudge_length);
+    // 对应 mypaint-brush.c:927-995。
+    // update_factor 可能在 recentness==0 时被改为 0（首次初始化：直接用采样色）。
+    let mut update_factor = 0.01f32.max(smudge_length);
 
     let recentness = bucket[PREV_COL_RECENTNESS] * update_factor;
     bucket[PREV_COL_RECENTNESS] = recentness;
 
     let margin = 0.0000000000000001;
     if recentness < 1.0f32.min((0.5 * update_factor).powf(smudge_length_log) + margin) {
+        if recentness == 0.0 {
+            // First initialization — sampled color used directly, no blend.
+            // 对应 mypaint-brush.c:942-945
+            update_factor = 0.0;
+        }
         bucket[PREV_COL_RECENTNESS] = 1.0;
 
         let smudge_radius = (radius * smudge_radius_log.exp())
