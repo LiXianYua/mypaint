@@ -1,88 +1,64 @@
-//! Tile operation queue + tilemap + FIFO.
-//! Corresponds to operationqueue.c, tilemap.c, fifo.c.
+//! Tile operation queue + dirty tile tracking.
+//! 对应 operationqueue.c + tilemap.c。
 
 use std::collections::HashMap;
 
-/// A tile operation (render dab, get color, etc.)
-pub struct TileOp {
-    pub tx: i32,
-    pub ty: i32,
-    pub level: i32,
-    pub readonly: bool,
+/// 一个 dab 操作，已经准备好被某个 tile 渲染。
+/// 对应 OperationDataDrawDab in operationqueue.c。
+#[derive(Debug, Clone, Copy)]
+pub struct OpDrawDab {
+    pub x: f32, pub y: f32, pub radius: f32,
+    pub color_r: u16, pub color_g: u16, pub color_b: u16,
+    pub color_a: f32, // 0..1
+    pub opaque: f32, pub hardness: f32, pub softness: f32,
+    pub aspect_ratio: f32, pub angle: f32,
+    pub lock_alpha: f32, pub colorize: f32,
+    pub posterize: f32, pub posterize_num: u16,
+    pub paint: f32,
+    pub normal: f32, // = 1 * (1-lock_alpha) * (1-colorize) * (1-posterize)
 }
 
-impl TileOp {
-    pub fn new(tx: i32, ty: i32, level: i32, readonly: bool) -> Self {
-        Self { tx, ty, level, readonly }
-    }
+/// Tile 坐标（按 tile 单位，不是像素）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TileIndex {
+    pub x: i32,
+    pub y: i32,
 }
 
-/// Simple FIFO-based operation queue.
+/// 按 tile 索引存储待处理 op，跟踪 dirty tiles。
 pub struct OperationQueue {
-    pending: Vec<TileOp>,
+    queues: HashMap<TileIndex, Vec<OpDrawDab>>,
 }
 
 impl OperationQueue {
     pub fn new() -> Self {
-        Self { pending: Vec::new() }
+        Self { queues: HashMap::new() }
     }
 
-    pub fn enqueue(&mut self, op: TileOp) {
-        self.pending.push(op);
+    /// 推入 op 到指定 tile 的队列。
+    pub fn add(&mut self, tile: TileIndex, op: OpDrawDab) {
+        self.queues.entry(tile).or_insert_with(Vec::new).push(op);
     }
 
-    pub fn dequeue(&mut self) -> Option<TileOp> {
-        if self.pending.is_empty() {
-            None
-        } else {
-            Some(self.pending.remove(0))
-        }
+    /// 取出该 tile 的所有 op（清空该队列）。
+    pub fn pop_all(&mut self, tile: TileIndex) -> Vec<OpDrawDab> {
+        self.queues.remove(&tile).unwrap_or_default()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.pending.is_empty()
+    /// 返回所有有 op 的 tile 索引迭代器。
+    pub fn dirty_tiles(&self) -> impl Iterator<Item = TileIndex> + '_ {
+        self.queues.keys().copied()
     }
 
-    pub fn len(&self) -> usize {
-        self.pending.len()
+    /// 清空所有 dirty tile 标记（process 完毕后调用）。
+    pub fn clear_dirty_tiles(&mut self) {
+        self.queues.clear();
     }
+
+    pub fn is_empty(&self) -> bool { self.queues.is_empty() }
+    pub fn len(&self) -> usize { self.queues.len() }
 }
 
 impl Default for OperationQueue {
-    fn default() -> Self { Self::new() }
-}
-
-/// Tile storage map. Corresponds to tilemap.c.
-pub struct TileMap<T> {
-    tiles: HashMap<(i32, i32, i32), T>,
-}
-
-impl<T> TileMap<T> {
-    pub fn new() -> Self {
-        Self { tiles: HashMap::new() }
-    }
-
-    pub fn get(&self, tx: i32, ty: i32, level: i32) -> Option<&T> {
-        self.tiles.get(&(tx, ty, level))
-    }
-
-    pub fn get_mut(&mut self, tx: i32, ty: i32, level: i32) -> Option<&mut T> {
-        self.tiles.get_mut(&(tx, ty, level))
-    }
-
-    pub fn insert(&mut self, tx: i32, ty: i32, level: i32, tile: T) {
-        self.tiles.insert((tx, ty, level), tile);
-    }
-
-    pub fn remove(&mut self, tx: i32, ty: i32, level: i32) -> Option<T> {
-        self.tiles.remove(&(tx, ty, level))
-    }
-
-    pub fn contains_key(&self, tx: i32, ty: i32, level: i32) -> bool {
-        self.tiles.contains_key(&(tx, ty, level))
-    }
-}
-
-impl<T> Default for TileMap<T> {
     fn default() -> Self { Self::new() }
 }
