@@ -352,3 +352,225 @@ pub unsafe extern "C" fn mypaint_brush_input_from_cname(name: *const c_char) -> 
         None => -1_i32 as c_int,
     }
 }
+
+// ============================================================================
+// MyPaintSurface 包装函数（mypaint-surface.c）+ FixedTiledSurface 暴露
+// 让 C 客户端能直接用 Rust 的 FixedTiledSurface
+// ============================================================================
+
+use crate::surface::fixed::FixedTiledSurface;
+
+/// Wrapper: 调用 vtable.draw_dab。对应 mypaint_surface_draw_dab。
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_draw_dab(
+    self_: *mut MyPaintSurface,
+    x: f32, y: f32, radius: f32,
+    color_r: f32, color_g: f32, color_b: f32,
+    opaque: f32, hardness: f32, softness: f32,
+    alpha_eraser: f32, aspect_ratio: f32, angle: f32,
+    lock_alpha: f32, colorize: f32, posterize: f32,
+    posterize_num: f32, paint: f32,
+) -> c_int {
+    if self_.is_null() { return 0; }
+    let Some(f) = (*self_).draw_dab else { return 0 };
+    f(self_, x, y, radius, color_r, color_g, color_b,
+      opaque, hardness, softness, alpha_eraser, aspect_ratio, angle,
+      lock_alpha, colorize, posterize, posterize_num, paint)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_get_color(
+    self_: *mut MyPaintSurface, x: f32, y: f32, radius: f32,
+    out_r: *mut f32, out_g: *mut f32, out_b: *mut f32, out_a: *mut f32,
+    paint: f32,
+) {
+    if self_.is_null() { return; }
+    let Some(f) = (*self_).get_color else { return };
+    f(self_, x, y, radius, out_r, out_g, out_b, out_a, paint);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_get_alpha(
+    self_: *mut MyPaintSurface, x: f32, y: f32, radius: f32,
+) -> f32 {
+    let (mut r, mut g, mut b, mut a) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    mypaint_surface_get_color(self_, x, y, radius, &mut r, &mut g, &mut b, &mut a, 1.0);
+    a
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_begin_atomic(self_: *mut MyPaintSurface) {
+    if self_.is_null() { return; }
+    if let Some(f) = (*self_).begin_atomic { f(self_); }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_end_atomic(self_: *mut MyPaintSurface, roi: *mut c_void) {
+    if self_.is_null() { return; }
+    if let Some(f) = (*self_).end_atomic { f(self_, roi); }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_save_png(
+    self_: *mut MyPaintSurface, path: *const c_char,
+    x: c_int, y: c_int, width: c_int, height: c_int,
+) {
+    if self_.is_null() { return; }
+    if let Some(f) = (*self_).save_png { f(self_, path, x, y, width, height); }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_ref(self_: *mut MyPaintSurface) {
+    if self_.is_null() { return; }
+    (*self_).refcount += 1;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_unref(self_: *mut MyPaintSurface) {
+    if self_.is_null() { return; }
+    (*self_).refcount -= 1;
+    if (*self_).refcount <= 0 {
+        if let Some(destroy) = (*self_).destroy {
+            destroy(self_);
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_surface_init(self_: *mut MyPaintSurface) {
+    if self_.is_null() { return; }
+    (*self_).refcount = 1;
+}
+
+// ============================================================================
+// Rust FixedTiledSurface → C MyPaintSurface 暴露
+// ============================================================================
+
+/// FFI wrapper: `MyPaintSurface` vtable + Rust FixedTiledSurface storage。
+/// C 客户端把它当作不透明的 MyPaintSurface 句柄使用。
+#[repr(C)]
+pub struct CFixedTiledSurface {
+    /// vtable 必须在头部，与 C 端 cast 兼容
+    surface: MyPaintSurface,
+    inner: FixedTiledSurface,
+}
+
+/// 创建 Rust FixedTiledSurface 给 C 用。返回值可以传给所有 mypaint_surface_* 函数。
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_fixed_tiled_surface_new(
+    width: c_int, height: c_int,
+) -> *mut CFixedTiledSurface {
+    let w = width.max(1) as usize;
+    let h = height.max(1) as usize;
+    let boxed = Box::new(CFixedTiledSurface {
+        surface: MyPaintSurface {
+            draw_dab: Some(fixed_draw_dab),
+            get_color: Some(fixed_get_color),
+            begin_atomic: Some(fixed_begin_atomic),
+            end_atomic: Some(fixed_end_atomic),
+            destroy: Some(fixed_destroy),
+            save_png: Some(fixed_save_png),
+            refcount: 1,
+        },
+        inner: FixedTiledSurface::new(w, h),
+    });
+    Box::into_raw(boxed)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_fixed_tiled_surface_get_width(
+    self_: *mut CFixedTiledSurface,
+) -> c_int {
+    if self_.is_null() { return 0; }
+    (*self_).inner.width() as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_fixed_tiled_surface_get_height(
+    self_: *mut CFixedTiledSurface,
+) -> c_int {
+    if self_.is_null() { return 0; }
+    (*self_).inner.height() as c_int
+}
+
+/// 返回作为通用 `MyPaintSurface*` 的指针（vtable 在结构头部）。
+#[no_mangle]
+pub unsafe extern "C" fn mypaint_fixed_tiled_surface_interface(
+    self_: *mut CFixedTiledSurface,
+) -> *mut MyPaintSurface {
+    if self_.is_null() { return std::ptr::null_mut(); }
+    &mut (*self_).surface
+}
+
+// vtable 函数实现 — 把 surface 指针 cast 回 CFixedTiledSurface 后调用 Rust 方法
+
+unsafe extern "C" fn fixed_draw_dab(
+    surface: *mut MyPaintSurface,
+    x: f32, y: f32, radius: f32,
+    color_r: f32, color_g: f32, color_b: f32,
+    opaque: f32, hardness: f32, softness: f32,
+    alpha_eraser: f32, aspect_ratio: f32, angle: f32,
+    lock_alpha: f32, colorize: f32, posterize: f32,
+    posterize_num: f32, paint: f32,
+) -> c_int {
+    let s = surface as *mut CFixedTiledSurface;
+    if s.is_null() { return 0; }
+    let params = DabParams {
+        x, y, radius, color_r, color_g, color_b,
+        opaque, hardness, softness, alpha_eraser,
+        aspect_ratio, angle, lock_alpha, colorize,
+        posterize, posterize_num, paint,
+    };
+    use crate::surface::Surface as _;
+    if (*s).inner.draw_dab(&params) { 1 } else { 0 }
+}
+
+unsafe extern "C" fn fixed_get_color(
+    surface: *mut MyPaintSurface, x: f32, y: f32, radius: f32,
+    out_r: *mut f32, out_g: *mut f32, out_b: *mut f32, out_a: *mut f32,
+    paint: f32,
+) {
+    let s = surface as *mut CFixedTiledSurface;
+    if s.is_null() { return; }
+    use crate::surface::Surface as _;
+    let (r, g, b, a) = (*s).inner.get_color(x, y, radius, paint);
+    if !out_r.is_null() { *out_r = r; }
+    if !out_g.is_null() { *out_g = g; }
+    if !out_b.is_null() { *out_b = b; }
+    if !out_a.is_null() { *out_a = a; }
+}
+
+unsafe extern "C" fn fixed_begin_atomic(surface: *mut MyPaintSurface) {
+    let s = surface as *mut CFixedTiledSurface;
+    if s.is_null() { return; }
+    use crate::surface::Surface as _;
+    (*s).inner.begin_atomic();
+}
+
+unsafe extern "C" fn fixed_end_atomic(surface: *mut MyPaintSurface, _roi: *mut c_void) {
+    let s = surface as *mut CFixedTiledSurface;
+    if s.is_null() { return; }
+    use crate::surface::Surface as _;
+    let _ = (*s).inner.end_atomic();
+    // TODO: roi 写回（如果 C 客户端提供了 MyPaintRectangles）
+}
+
+unsafe extern "C" fn fixed_destroy(surface: *mut MyPaintSurface) {
+    let s = surface as *mut CFixedTiledSurface;
+    if s.is_null() { return; }
+    drop(Box::from_raw(s));
+}
+
+unsafe extern "C" fn fixed_save_png(
+    surface: *mut MyPaintSurface, path: *const c_char,
+    x: c_int, y: c_int, width: c_int, height: c_int,
+) {
+    let s = surface as *mut CFixedTiledSurface;
+    if s.is_null() || path.is_null() { return; }
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    use crate::surface::Surface as _;
+    (*s).inner.save_png(std::path::Path::new(path_str), x, y, width, height);
+}
