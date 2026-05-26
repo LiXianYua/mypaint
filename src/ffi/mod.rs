@@ -323,7 +323,7 @@ pub unsafe extern "C" fn mypaint_brush_from_string(
     match handle(self_).from_string(s) {
         Ok(()) => 1,
         Err(e) => {
-            eprintln!("mypaint_brush_from_string: {e}");
+            log::error!("mypaint_brush_from_string: {e}");
             0
         }
     }
@@ -580,7 +580,7 @@ pub unsafe extern "C" fn mypaint_brush_set_smudge_bucket_state(
     ) {
         Ok(()) => 1,
         Err(e) => {
-            eprintln!("mypaint_brush_set_smudge_bucket_state: {e}");
+            log::error!("mypaint_brush_set_smudge_bucket_state: {e}");
             0
         }
     }

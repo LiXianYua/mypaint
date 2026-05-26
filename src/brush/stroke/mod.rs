@@ -149,14 +149,14 @@ impl Brush {
 
         let pressure = if pressure <= 0.0 { 0.0 } else { pressure };
         if !x.is_finite() || !y.is_finite() || x > 1e10 || y > 1e10 || x < -1e10 || y < -1e10 {
-            eprintln!("Warning: ignoring brush::stroke_to with insane inputs (x = {x}, y = {y})");
+            log::warn!("ignoring brush::stroke_to with insane inputs (x = {x}, y = {y})");
             // Reset to safe values
             return true;
         }
         assert!(x < 1e8 && y < 1e8 && x > -1e8 && y > -1e8);
 
         if dtime < 0.0 {
-            eprintln!("Time jumped backwards by dtime={dtime} seconds!");
+            log::warn!("Time jumped backwards by dtime={dtime} seconds!");
         }
         if dtime <= 0.0 {
             dtime = 0.0001;

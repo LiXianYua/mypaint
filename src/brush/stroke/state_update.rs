@@ -114,7 +114,7 @@ impl Brush {
         } = *step;
         let mut step_dtime = step_dtime_in;
         if step_dtime < 0.0 {
-            eprintln!("Time is running backwards!");
+            log::warn!("Time is running backwards!");
             step_dtime = 0.001;
         } else if step_dtime == 0.0 {
             step_dtime = 0.001;

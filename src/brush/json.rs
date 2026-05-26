@@ -53,7 +53,7 @@ impl Brush {
             if let Some(setting_id) = BrushSetting::from_cname(setting_name) {
                 self.update_setting_from_json(setting_id, setting_obj);
             } else {
-                eprintln!("Warning: Unknown setting: {setting_name}");
+                log::warn!("Unknown setting: {setting_name}");
             }
         }
         Ok(())
@@ -61,7 +61,7 @@ impl Brush {
 
     fn update_setting_from_json(&mut self, setting_id: BrushSetting, obj: &serde_json::Value) {
         let Some(obj) = obj.as_object() else {
-            eprintln!("Warning: Wrong type for setting: {}", setting_id.cname());
+            log::warn!("Wrong type for setting: {}", setting_id.cname());
             return;
         };
 
@@ -69,7 +69,7 @@ impl Brush {
         if let Some(base_value) = obj.get("base_value").and_then(|v| v.as_f64()) {
             self.set_base_value(setting_id, base_value as f32);
         } else {
-            eprintln!("Warning: No 'base_value' for: {}", setting_id.cname());
+            log::warn!("No 'base_value' for: {}", setting_id.cname());
             return;
         }
 
@@ -91,7 +91,7 @@ impl Brush {
                         }
                     }
                 } else {
-                    eprintln!("Warning: Unknown input: {input_name}");
+                    log::warn!("Unknown input: {input_name}");
                 }
             }
         }
