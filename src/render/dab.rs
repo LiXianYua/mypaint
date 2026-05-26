@@ -91,18 +91,78 @@ pub fn calculate_opa(rr: f32, params: &MaskParams) -> f32 {
     offset + rr * slope
 }
 
-/// Antialiased rr for small radii (radius < 3). 对应 calculate_rr_antialiased。
-/// 简化版本：取像素中心 + 邻边采样的距离平均。
+/// 计算 r²（不除以 radius²）— C 版 calculate_r_sample。
+#[inline]
+fn calculate_r_sample(x: f32, y: f32, aspect_ratio: f32, sn: f32, cs: f32) -> f32 {
+    let yyr = (y * cs - x * sn) * aspect_ratio;
+    let xxr = y * sn + x * cs;
+    yyr * yyr + xxr * xxr
+}
+
+#[inline]
+fn sign_point_in_line(px: f32, py: f32, vx: f32, vy: f32) -> f32 {
+    (px - vx) * (-vy) - vx * (py - vy)
+}
+
+#[inline]
+fn closest_point_to_line(lx: f32, ly: f32, px: f32, py: f32) -> (f32, f32) {
+    let l2 = lx * lx + ly * ly;
+    let ltp_dot = px * lx + py * ly;
+    let t = ltp_dot / l2;
+    (lx * t, ly * t)
+}
+
+/// Antialiased rr for small radii (radius < 3).
+/// 对应 mypaint-tiled-surface.c:277-354 calculate_rr_antialiased。
 #[inline]
 pub fn calculate_rr_antialiased(
     xp: i32, yp: i32, x: f32, y: f32, aspect_ratio: f32,
     sn: f32, cs: f32, one_over_radius2: f32,
-    _r_aa_start: f32,
+    r_aa_start: f32,
 ) -> f32 {
-    // C 版本使用 nearest/farthest pixel-corner 距离的最近点优化；
-    // 这里先用简单中心采样保留几何正确性（小半径下的 AA 暂未严格匹配，
-    // 但 base 渲染的 calculate_rr 已经覆盖主流情况）。
-    calculate_rr(xp, yp, x, y, aspect_ratio, sn, cs, one_over_radius2)
+    let pixel_right = x - xp as f32;
+    let pixel_bottom = y - yp as f32;
+    let pixel_center_x = pixel_right - 0.5;
+    let pixel_center_y = pixel_bottom - 0.5;
+    let pixel_left = pixel_right - 1.0;
+    let pixel_top = pixel_bottom - 1.0;
+
+    let (nearest_x, nearest_y, r_near, rr_near) = if pixel_left < 0.0 && pixel_right > 0.0
+        && pixel_top < 0.0 && pixel_bottom > 0.0
+    {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        let (mut nx, mut ny) = closest_point_to_line(cs, sn, pixel_center_x, pixel_center_y);
+        nx = nx.clamp(pixel_left, pixel_right);
+        ny = ny.clamp(pixel_top, pixel_bottom);
+        let r = calculate_r_sample(nx, ny, aspect_ratio, sn, cs);
+        (nx, ny, r, r * one_over_radius2)
+    };
+
+    if rr_near > 1.0 {
+        return rr_near;
+    }
+
+    let center_sign = sign_point_in_line(pixel_center_x, pixel_center_y, cs, -sn);
+    let rad_area_1 = (1.0 / std::f32::consts::PI).sqrt();
+
+    let (farthest_x, farthest_y) = if center_sign < 0.0 {
+        (nearest_x - sn * rad_area_1, nearest_y + cs * rad_area_1)
+    } else {
+        (nearest_x + sn * rad_area_1, nearest_y - cs * rad_area_1)
+    };
+
+    let r_far = calculate_r_sample(farthest_x, farthest_y, aspect_ratio, sn, cs);
+    let rr_far = r_far * one_over_radius2;
+
+    if r_far < r_aa_start {
+        return (rr_far + rr_near) * 0.5;
+    }
+
+    let visibility_near = 1.0 - rr_near;
+    let delta = rr_far - rr_near;
+    let delta2 = 1.0 + delta;
+    1.0 - visibility_near / delta2
 }
 
 #[cfg(test)]

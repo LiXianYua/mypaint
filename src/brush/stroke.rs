@@ -763,6 +763,10 @@ impl Brush {
         let mut painted: Option<bool> = None;
         let mut dtime_left = dtime as f32;
 
+        // 持久化 step_dpressure（stroke-split 检查需要最后一次的值，
+        // 对应 C 的 `step_dpressure` 在循环外声明）
+        let mut last_step_dpressure: f32 = 0.0;
+
         let mut dabs_moved = self.state.partial_dabs;
         let mut dabs_todo = self.count_dabs(input_x, input_y, dtime as f32);
 
@@ -803,6 +807,7 @@ impl Brush {
                 }
             };
 
+            last_step_dpressure = step_dpressure;
             self.update_states(step_ddab, step_dx, step_dy,
                 step_dpressure, step_declination, step_ascension,
                 step_dtime, viewzoom, viewrotation,
@@ -824,8 +829,9 @@ impl Brush {
         }
 
         // Move brush to current time (no more dab will happen)
+        // 对应 mypaint-brush.c:1482，使用 dabs_todo (不含 dabs_moved)
         {
-            let step_ddab = dabs_moved + dabs_todo;
+            let step_ddab = dabs_todo;
             let step_dx = input_x - self.state.x;
             let step_dy = input_y - self.state.y;
             let step_dpressure = pressure - self.state.pressure;
@@ -862,9 +868,10 @@ impl Brush {
             self.stroke_total_painting_time += dtime;
             self.stroke_current_idling_time = 0.0;
             if self.stroke_total_painting_time > 4.0 + 3.0 * pressure as f64 {
-                // Check if pressure is not being released
-                // Approximate: check last step_dpressure sign
-                if pressure - self.state.pressure >= -0.001 {
+                // Only split if pressure isn't being released.
+                // 对应 mypaint-brush.c:1525：`if (step_dpressure >= 0)` —
+                // 使用循环中最后一次保存的 step_dpressure。
+                if last_step_dpressure >= 0.0 {
                     return true;
                 }
             }

@@ -101,3 +101,44 @@ pub fn mix_colors(
 
     [rgb[0], rgb[1], rgb[2], result_alpha]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgb_spectral_roundtrip_identity() {
+        // 纯白往返：rgb→spectral→rgb 应接近原色
+        let spec = rgb_to_spectral(1.0, 1.0, 1.0);
+        let (r, g, b) = spectral_to_rgb(&spec);
+        assert!((r - 1.0).abs() < 0.05);
+        assert!((g - 1.0).abs() < 0.05);
+        assert!((b - 1.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn mix_colors_zero_fac_is_b() {
+        // fac=0 时返回 b（除 alpha 外）
+        let a = [1.0, 0.0, 0.0, 1.0];
+        let b = [0.0, 1.0, 0.0, 1.0];
+        let mixed = mix_colors(&a, &b, 0.0, 0.0); // linear, fac=0
+        assert!((mixed[0] - b[0]).abs() < 1e-5);
+        assert!((mixed[1] - b[1]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn mix_colors_full_fac_is_a() {
+        let a = [1.0, 0.0, 0.0, 1.0];
+        let b = [0.0, 1.0, 0.0, 1.0];
+        let mixed = mix_colors(&a, &b, 1.0, 0.0); // linear, fac=1
+        assert!((mixed[0] - a[0]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn mix_colors_alpha_clamped() {
+        let a = [0.0, 0.0, 0.0, 0.5];
+        let b = [0.0, 0.0, 0.0, 0.5];
+        let mixed = mix_colors(&a, &b, 0.5, 0.0);
+        assert!((mixed[3] - 0.5).abs() < 1e-5);
+    }
+}

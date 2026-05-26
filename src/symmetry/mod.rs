@@ -177,3 +177,47 @@ impl SymmetryData {
         t.transform_point(x, y)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_inactive_returns_input_unchanged() {
+        let sd = SymmetryData::default();
+        let (x, y) = sd.transform_point(0, 5.0, 7.0);
+        assert_eq!((x, y), (5.0, 7.0));
+        assert_eq!(sd.num_symmetry_points(), 1);
+    }
+
+    #[test]
+    fn vertical_symmetry_mirrors_x() {
+        let mut sd = SymmetryData::default();
+        sd.set_pending(true, 100.0, 0.0, 0.0, SymmetryType::Vertical, 0);
+        sd.update();
+        assert_eq!(sd.num_symmetry_points(), 2);
+        // 第二个点是 x 镜像
+        let (x, y) = sd.transform_point(1, 10.0, 50.0);
+        assert!((x - 190.0).abs() < 1e-5, "expected x=190, got {x}");
+        assert!((y - 50.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn horizontal_symmetry_mirrors_y() {
+        let mut sd = SymmetryData::default();
+        sd.set_pending(true, 0.0, 100.0, 0.0, SymmetryType::Horizontal, 0);
+        sd.update();
+        assert_eq!(sd.num_symmetry_points(), 2);
+        let (x, y) = sd.transform_point(1, 10.0, 30.0);
+        assert!((x - 10.0).abs() < 1e-5);
+        assert!((y - 170.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn verthorz_produces_four_points() {
+        let mut sd = SymmetryData::default();
+        sd.set_pending(true, 0.0, 0.0, 0.0, SymmetryType::VertHorz, 0);
+        sd.update();
+        assert_eq!(sd.num_symmetry_points(), 4);
+    }
+}

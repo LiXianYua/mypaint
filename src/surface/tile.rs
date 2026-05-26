@@ -3,11 +3,13 @@
 
 use crate::surface::Surface;
 use crate::render::DabParams;
-use crate::render::dab::{calculate_rr, calculate_opa, MaskParams};
+use crate::render::dab::{calculate_rr, calculate_rr_antialiased, calculate_opa, MaskParams};
 use crate::render::blend::{
     blend_pixel_normal, blend_pixel_normal_eraser,
     blend_pixel_lock_alpha, blend_pixel_color, blend_pixel_posterize,
+    blend_pixel_normal_paint, blend_pixel_normal_eraser_paint, blend_pixel_lock_alpha_paint,
 };
+use crate::smudge::rgb_to_spectral;
 use crate::util::rect::{Rect, Rectangles};
 use crate::symmetry::SymmetryData;
 use std::path::Path;
@@ -89,12 +91,27 @@ impl TiledSurface {
         let cs = angle_rad.cos();
         let sn = angle_rad.sin();
         let one_over_radius2 = 1.0 / (radius * radius);
+        // 小半径走 AA 路径，对应 mypaint-tiled-surface.c:434-449
+        let use_aa = radius < 3.0;
+        let aa_border = 1.0f32;
+        let mut r_aa_start = if radius > aa_border { radius - aa_border } else { 0.0 };
+        r_aa_start = r_aa_start * r_aa_start / aspect_ratio;
 
         let opacity = (params.opaque.clamp(0.0, 1.0) * SCALE as f32) as u16;
         let color_r = (params.color_r.clamp(0.0, 1.0) * SCALE as f32) as u16;
         let color_g = (params.color_g.clamp(0.0, 1.0) * SCALE as f32) as u16;
         let color_b = (params.color_b.clamp(0.0, 1.0) * SCALE as f32) as u16;
         let color_a = (params.alpha_eraser.clamp(0.0, 1.0) * SCALE as f32) as u16;
+        let use_paint = params.paint > 0.0;
+        // Pre-compute spectral 表示，只在 paint > 0 时使用
+        let spectral_a = if use_paint {
+            rgb_to_spectral(
+                params.color_r.clamp(0.0, 1.0),
+                params.color_g.clamp(0.0, 1.0),
+                params.color_b.clamp(0.0, 1.0))
+        } else {
+            [0.0; 10]
+        };
 
         let num_points = self.symmetry_data.num_symmetry_points();
 
@@ -118,9 +135,15 @@ impl TiledSurface {
 
             for py in y0..=y1 {
                 for px in x0..=x1 {
-                    let rr = calculate_rr(
-                        px as i32, py as i32, sx, sy,
-                        aspect_ratio, sn, cs, one_over_radius2);
+                    let rr = if use_aa {
+                        calculate_rr_antialiased(
+                            px as i32, py as i32, sx, sy,
+                            aspect_ratio, sn, cs, one_over_radius2, r_aa_start)
+                    } else {
+                        calculate_rr(
+                            px as i32, py as i32, sx, sy,
+                            aspect_ratio, sn, cs, one_over_radius2)
+                    };
                     let opa = calculate_opa(rr, &mask_params);
                     let mask_val = (opa * SCALE as f32) as u16;
                     if mask_val == 0 { continue; }
@@ -138,16 +161,30 @@ impl TiledSurface {
                         );
                     }
 
-                    // Choose blend mode: priority lock_alpha > colorize > eraser > normal
+                    // Choose blend mode: priority lock_alpha > colorize > (paint? > eraser > normal)
                     if params.lock_alpha >= 1.0 {
-                        blend_pixel_lock_alpha(pixel, mask_val,
-                            color_r, color_g, color_b, opacity);
+                        if use_paint {
+                            blend_pixel_lock_alpha_paint(pixel, mask_val,
+                                color_r, color_g, color_b, opacity, &spectral_a);
+                        } else {
+                            blend_pixel_lock_alpha(pixel, mask_val,
+                                color_r, color_g, color_b, opacity);
+                        }
                     } else if params.colorize >= 1.0 {
+                        // Colorize blend (luminance-preserving)。Paint mode 对该模式无意义。
                         blend_pixel_color(pixel, mask_val,
                             color_r, color_g, color_b, opacity);
                     } else if params.alpha_eraser < (SCALE as f32 - 1.0) / SCALE as f32 {
-                        blend_pixel_normal_eraser(pixel, mask_val,
-                            color_r, color_g, color_b, color_a, opacity);
+                        if use_paint {
+                            blend_pixel_normal_eraser_paint(pixel, mask_val,
+                                color_r, color_g, color_b, color_a, opacity, &spectral_a);
+                        } else {
+                            blend_pixel_normal_eraser(pixel, mask_val,
+                                color_r, color_g, color_b, color_a, opacity);
+                        }
+                    } else if use_paint {
+                        blend_pixel_normal_paint(pixel, mask_val,
+                            color_r, color_g, color_b, opacity, &spectral_a);
                     } else {
                         blend_pixel_normal(pixel, mask_val,
                             color_r, color_g, color_b, opacity);

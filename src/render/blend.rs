@@ -222,6 +222,60 @@ pub fn blend_pixel_normal_eraser_paint(
     px[2] = rgb[2] as u16;
 }
 
+/// Spectral Lock Alpha + Paint blend.
+/// 对应 draw_dab_pixels_BlendMode_LockAlpha_Paint。
+#[inline]
+pub fn blend_pixel_lock_alpha_paint(
+    px: &mut [u16; 4], mask_val: u16,
+    _color_r: u16, _color_g: u16, _color_b: u16,
+    opacity: u16,
+    spectral_a: &[f32; 10],
+) {
+    // C 版强制 opacity 至少 150 (4.6e-3) 避免低 opacity 取整误差
+    let opacity = opacity.max(150);
+    let opa_a_raw = (mask_val as u32 * opacity as u32) / SCALE;
+    let opa_b = SCALE - opa_a_raw;
+    let opa_a = opa_a_raw * px[3] as u32 / SCALE;
+    if px[3] == 0 {
+        // 与 _Paint normal 版本一致：alpha 为 0 时退化到 additive
+        // 但 LockAlpha 不修改 alpha，故只更新 RGB
+        px[0] = ((opa_a * _color_r as u32 + opa_b * px[0] as u32) / SCALE) as u16;
+        px[1] = ((opa_a * _color_g as u32 + opa_b * px[1] as u32) / SCALE) as u16;
+        px[2] = ((opa_a * _color_b as u32 + opa_b * px[2] as u32) / SCALE) as u16;
+        return;
+    }
+    let denom = opa_a as f32 + opa_b as f32 * px[3] as f32 / SCALE as f32;
+    let fac_a = if denom > 0.0 { opa_a as f32 / denom } else { 0.0 };
+    let fac_b = 1.0 - fac_a;
+
+    let spectral_b = rgb_to_spectral(
+        px[0] as f32 / px[3] as f32,
+        px[1] as f32 / px[3] as f32,
+        px[2] as f32 / px[3] as f32);
+    let mut spectral_result = [0.0f32; 10];
+    for i in 0..10 {
+        spectral_result[i] = spectral_a[i].powf(fac_a) * spectral_b[i].powf(fac_b);
+    }
+    let (sr, sg, sb) = spectral_to_rgb(&spectral_result);
+
+    px[0] = (sr * px[3] as f32 + 0.5) as u16;
+    px[1] = (sg * px[3] as f32 + 0.5) as u16;
+    px[2] = (sb * px[3] as f32 + 0.5) as u16;
+}
+
+/// 标准 Normal Paint blend（color_a 视为 SCALE，即不擦除）。
+#[inline]
+pub fn blend_pixel_normal_paint(
+    px: &mut [u16; 4], mask_val: u16,
+    color_r: u16, color_g: u16, color_b: u16,
+    opacity: u16,
+    spectral_a: &[f32; 10],
+) {
+    blend_pixel_normal_eraser_paint(
+        px, mask_val, color_r, color_g, color_b, SCALE as u16,
+        opacity, spectral_a);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
