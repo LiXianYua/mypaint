@@ -767,20 +767,25 @@ impl Brush {
             }
         }
 
-        // slow_tracking fac
+        // slow_tracking fac — modifies the LOCAL cursor position, not state.x/state.y
+        // The C code modifies local variables x, y here. state.x is updated in update_states.
         let fac = 1.0 - Self::exp_decay(
             baseval(self, BrushSetting::SlowTracking),
             100.0 * dtime as f32);
-        self.state.x = self.state.x + (effective_x - self.state.x) * fac;
-        self.state.y = self.state.y + (effective_y - self.state.y) * fac;
+        let filtered_x = self.state.x + (effective_x - self.state.x) * fac;
+        let filtered_y = self.state.y + (effective_y - self.state.y) * fac;
+
+        // Save the input position for count_dabs (C code passes filtered x, y)
+        let input_x = filtered_x;
+        let input_y = filtered_y;
 
         // reset or time jump
         if dtime > (max_dtime as f64) || self.reset_requested {
             self.reset_requested = false;
             self.brush_reset();
             self.random_input = self.rng.next();
-            self.state.x = effective_x;
-            self.state.y = effective_y;
+            self.state.x = input_x;
+            self.state.y = input_y;
             self.state.pressure = pressure;
             self.state.actual_x = self.state.x;
             self.state.actual_y = self.state.y;
@@ -793,7 +798,7 @@ impl Brush {
         let mut dtime_left = dtime as f32;
 
         let mut dabs_moved = self.state.partial_dabs;
-        let dabs_todo = self.count_dabs(effective_x, effective_y, dtime as f32);
+        let mut dabs_todo = self.count_dabs(input_x, input_y, dtime as f32);
 
         while dabs_moved + dabs_todo >= 1.0 {
             let (step_ddab, step_dx, step_dy, step_dpressure, step_dtime,
@@ -805,8 +810,8 @@ impl Brush {
                     let frac = step_ddab / dabs_todo;
                     (
                         step_ddab,
-                        frac * (effective_x - self.state.x),
-                        frac * (effective_y - self.state.y),
+                        frac * (input_x - self.state.x),
+                        frac * (input_y - self.state.y),
                         frac * (pressure - self.state.pressure),
                         frac * dtime_left,
                         frac * (tilt_declination - self.state.declination),
@@ -819,8 +824,8 @@ impl Brush {
                     let frac = 1.0 / dabs_todo;
                     (
                         1.0,
-                        frac * (effective_x - self.state.x),
-                        frac * (effective_y - self.state.y),
+                        frac * (input_x - self.state.x),
+                        frac * (input_y - self.state.y),
                         frac * (pressure - self.state.pressure),
                         frac * dtime_left,
                         frac * (tilt_declination - self.state.declination),
@@ -849,13 +854,14 @@ impl Brush {
 
             self.random_input = self.rng.next();
             dtime_left -= step_dtime;
+            dabs_todo = self.count_dabs(input_x, input_y, dtime_left);
         }
 
         // Move brush to current time (no more dab will happen)
         {
             let step_ddab = dabs_moved + dabs_todo;
-            let step_dx = effective_x - self.state.x;
-            let step_dy = effective_y - self.state.y;
+            let step_dx = input_x - self.state.x;
+            let step_dy = input_y - self.state.y;
             let step_dpressure = pressure - self.state.pressure;
             let step_declination = tilt_declination - self.state.declination;
             let step_declinationx = tilt_declinationx - self.state.declinationx;
