@@ -78,6 +78,38 @@ fn test_replay_events_smoke() {
         !surface.calls.is_empty(),
         "should have drawn at least one dab"
     );
+
+    // Behavior-preservation snapshot for milestone 3 (stroke.rs decomposition).
+    // 在 P1 之后基线 = 1540。P2/P3/P4/P5 是 pure refactor，dab 总数和
+    // 各 dab 的关键参数必须保持不变。
+    //
+    // 若以后有意改动行为（例如 RNG 序列、time-discretization 算法），
+    // 需要更新这两个数字并在 commit message 里说明。
+    const BASELINE_DAB_COUNT: usize = 1540;
+    assert_eq!(
+        surface.calls.len(),
+        BASELINE_DAB_COUNT,
+        "regression: dab count drifted from baseline (P1 baseline = {BASELINE_DAB_COUNT})"
+    );
+
+    // 抽样首尾若干 dab 的 (x, y) — RNG 顺序漂移会让这些值都变。
+    // 浮点跨平台微差 → 用相对宽松的精度（1e-3 像素，远小于一个 dab 半径）。
+    fn approx_eq(a: f32, b: f32) {
+        assert!(
+            (a - b).abs() < 1e-3,
+            "value drift: got {a}, expected {b} (Δ = {})",
+            (a - b).abs()
+        );
+    }
+    // 首 3 个 dab 锁定 RNG 初始顺序 + 第一段 stroke 的 motion smoothing。
+    approx_eq(surface.calls[0].x, 224.201721);
+    approx_eq(surface.calls[0].y, 207.184906);
+    approx_eq(surface.calls[1].x, 225.992981);
+    approx_eq(surface.calls[2].x, 214.074112);
+    // 末 1 个 dab 锁定 30 秒 replay 后期累积状态。
+    let last = &surface.calls[BASELINE_DAB_COUNT - 1];
+    approx_eq(last.x, 733.367920);
+    approx_eq(last.y, 98.607506);
 }
 
 #[test]
