@@ -39,4 +39,6 @@
 
 ## 文件完整性
 
-所有 12 个预设都已复制了对应的 `.myb` 文件和 `.png` preview 缩略图。
+12 个 `.myb` 全部复制，对应 `.png` preview 缩略图 11 个。
+
+**例外：`marker_2.myb`（来源 `ramon/Marker.myb`）上游无 `.png` preview 配对**，未复制。Phase 0 仅用 `.myb` 渲染做视觉对照，preview 缩略图不参与 baseline 流程；UI 缩略图（如有需要）可由 Phase 0.3 渲染器自行生成。
