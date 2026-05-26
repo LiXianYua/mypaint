@@ -17,7 +17,7 @@ use crate::render::blend::{
     blend_dab_posterize,
 };
 use crate::render::mask::{render_dab_mask, Coverage15, MaskBuffer, Premul15, RleEntry};
-use crate::smudge::rgb_to_spectral;
+use crate::smudge::{rgb_to_spectral, Spectral};
 use crate::symmetry::SymmetryData;
 use crate::util::rect::{Rect, Rectangles};
 use std::path::Path;
@@ -189,7 +189,7 @@ pub(crate) fn process_op(
     let one_scale = SCALE as f32;
 
     // Spectral 表示（仅当 paint > 0 时需要）
-    let spectral_a: [f32; 10] = if op.paint > 0.0 {
+    let spectral_a: Spectral = if op.paint > 0.0 {
         rgb_to_spectral(
             op.color_r.raw() as f32 / one_scale,
             op.color_g.raw() as f32 / one_scale,
@@ -476,10 +476,9 @@ fn accumulate_tile_color_rle(
     sum_g: &mut f32,
     sum_b: &mut f32,
     sum_a: &mut f32,
-    avg_spectral: &mut [f32; 10],
+    avg_spectral: &mut Spectral,
     avg_rgb: &mut [f32; 3],
 ) {
-    use crate::smudge::rgb_to_spectral;
 
     if paint < 0.0 {
         // Legacy: 纯加权累加 premultiplied RGBA

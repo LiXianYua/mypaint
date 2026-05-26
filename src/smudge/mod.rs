@@ -1,5 +1,14 @@
 use crate::util::helpers::WGM_EPSILON;
 
+/// 10-bin spectral 颜色表示，用于光谱混合（Weighted Geometric Mean）。
+///
+/// 每个 bin 是对应波长的反射率/亮度权重，可由 [`rgb_to_spectral`] 从 sRGB
+/// 转换得到，由 [`spectral_to_rgb`] 还原。
+pub type Spectral = [f32; SPECTRAL_BINS];
+
+/// 光谱 bin 的数量（[`Spectral`] 数组长度）。
+pub const SPECTRAL_BINS: usize = 10;
+
 // 10-bin spectral primaries (from helpers.c:49-59)
 const SPECTRAL_R: [f32; 10] = [
     0.009281362787953,
@@ -81,7 +90,7 @@ const T_MATRIX: [[f32; 10]; 3] = [
 /// Convert RGB to 10-bin spectral distribution.
 /// Corresponds to `rgb_to_spectral` in helpers.c:521.
 #[inline]
-pub fn rgb_to_spectral(r: f32, g: f32, b: f32) -> [f32; 10] {
+pub fn rgb_to_spectral(r: f32, g: f32, b: f32) -> Spectral {
     let offset = 1.0 - WGM_EPSILON;
     let r = r * offset + WGM_EPSILON;
     let g = g * offset + WGM_EPSILON;
@@ -96,7 +105,7 @@ pub fn rgb_to_spectral(r: f32, g: f32, b: f32) -> [f32; 10] {
 /// Convert 10-bin spectral distribution to RGB.
 /// Corresponds to `spectral_to_rgb` in helpers.c:547.
 #[inline]
-pub fn spectral_to_rgb(spectral: &[f32; 10]) -> (f32, f32, f32) {
+pub fn spectral_to_rgb(spectral: &Spectral) -> (f32, f32, f32) {
     let offset = 1.0 - WGM_EPSILON;
     let mut tmp = [0.0; 3];
     for i in 0..10 {

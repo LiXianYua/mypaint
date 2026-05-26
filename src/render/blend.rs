@@ -12,7 +12,7 @@
 //! 类型（mask coverage / RLE skip）。
 
 use crate::render::mask::{Coverage15, Premul15, RleEntry};
-use crate::smudge::{rgb_to_spectral, spectral_to_rgb};
+use crate::smudge::{rgb_to_spectral, spectral_to_rgb, Spectral};
 
 const SCALE: u32 = Coverage15::SCALE;
 
@@ -274,7 +274,7 @@ pub fn blend_dab_normal_eraser_paint(
     color_b: Premul15,
     color_a: Premul15,
     opacity: Coverage15,
-    spectral_a: &[f32; 10],
+    spectral_a: &Spectral,
 ) {
     let color_r = color_r.raw() as u32;
     let color_g = color_g.raw() as u32;
@@ -337,7 +337,7 @@ pub fn blend_dab_normal_paint(
     color_g: Premul15,
     color_b: Premul15,
     opacity: Coverage15,
-    spectral_a: &[f32; 10],
+    spectral_a: &Spectral,
 ) {
     blend_dab_normal_eraser_paint(
         mask,
@@ -359,7 +359,7 @@ pub fn blend_dab_lock_alpha_paint(
     color_g: Premul15,
     color_b: Premul15,
     opacity: Coverage15,
-    spectral_a: &[f32; 10],
+    spectral_a: &Spectral,
 ) {
     let color_r = color_r.raw() as u32;
     let color_g = color_g.raw() as u32;
