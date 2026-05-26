@@ -33,6 +33,34 @@ const GRID_SIZE: f32 = 256.0;
 ///
 /// `viewzoom` / `viewrotation` 不在这里 — 它们是 `stroke_to` 这一整次
 /// 调用的常量，不是单步 delta。
+/// 一次 `stroke_to` 调用期间的不变量上下文。bundled 给 `paint_dabs_for_timestep`
+/// 和 `make_step` 这些内部 helper 用，避免传 10 个独立 f32 参数。
+#[derive(Clone, Copy, Debug)]
+struct StrokeContext {
+    input_x: f32,
+    input_y: f32,
+    pressure: f32,
+    tilt_ascension: f32,
+    tilt_declination: f32,
+    tilt_declinationx: f32,
+    tilt_declinationy: f32,
+    viewzoom: f32,
+    /// 弧度（未 normalize）。
+    viewrotation: f32,
+    /// 单位 turn (0..=1)。后续 `* 360.0` 转度。
+    barrel_rotation: f32,
+}
+
+/// `paint_dabs_for_timestep` 的输出，给 stroke-split 决策用。
+#[derive(Clone, Copy, Debug)]
+struct PaintDabsResult {
+    /// `Some(true)` = 该 timestep 内画了至少一个 dab；`Some(false)` = 没画
+    /// （但 op 被处理过）；`None` = 没进过 loop。
+    painted: Option<bool>,
+    /// 循环里最后一个 dab 的 `step.dpressure`，stroke-split 决策需要。
+    last_step_dpressure: f32,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct StrokeStep {
     /// 这一步消耗的 dab 分数（0..=1）。
@@ -855,6 +883,109 @@ impl Brush {
         }
     }
 
+    /// 在给定 timestep 内推进 brush state 并 draw 出所有 dab。
+    ///
+    /// 对应 mypaint-brush.c:1428-1490 的内部循环 + catch-up step。
+    /// 主循环负责：在 `dabs_moved + dabs_todo >= 1.0` 时拆出一个 1-dab 子步，
+    /// 推进 state，画 dab。循环结束后做一个 `dabs_todo` 长度的 catch-up
+    /// 把剩余时间走完（不画 dab）。最后把 `dabs_moved + dabs_todo` 存到
+    /// `state.partial_dabs` 供下次 stroke_to 复用。
+    fn paint_dabs_for_timestep(
+        &mut self,
+        surface: &mut dyn Surface,
+        ctx: &StrokeContext,
+        linear: bool,
+        dtime: f32,
+    ) -> PaintDabsResult {
+        let mut painted: Option<bool> = None;
+        let mut dtime_left = dtime;
+        // 持久化 step_dpressure（stroke-split 检查需要最后一次的值，
+        // 对应 C 的 `step_dpressure` 在循环外声明）
+        let mut last_step_dpressure: f32 = 0.0;
+        let mut dabs_moved = self.state.partial_dabs;
+        let mut dabs_todo = self.count_dabs(ctx.input_x, ctx.input_y, dtime);
+
+        while dabs_moved + dabs_todo >= 1.0 {
+            let step = if dabs_moved > 0.001 {
+                let ddab = 1.0 - dabs_moved;
+                dabs_moved = 0.0;
+                let frac = ddab / dabs_todo;
+                self.make_step(ctx, frac, ddab, dtime_left)
+            } else {
+                let frac = 1.0 / dabs_todo;
+                self.make_step(ctx, frac, 1.0, dtime_left)
+            };
+
+            last_step_dpressure = step.dpressure;
+            let step_dtime = step.dtime;
+            self.update_states(&step, ctx.viewzoom, ctx.viewrotation);
+
+            // Flip between 1 and -1
+            self.state.flip *= -1.0;
+
+            let painted_now = self.prepare_and_draw_dab(surface, linear);
+            if painted_now {
+                painted = Some(true);
+            } else if painted.is_none() {
+                painted = Some(false);
+            }
+
+            self.random_input = self.rng.next();
+            dtime_left -= step_dtime;
+            dabs_todo = self.count_dabs(ctx.input_x, ctx.input_y, dtime_left);
+        }
+
+        // Move brush to current time (no more dab will happen)
+        // 对应 mypaint-brush.c:1482，使用 dabs_todo (不含 dabs_moved)
+        let catch_up = StrokeStep {
+            ddab: dabs_todo,
+            dx: ctx.input_x - self.state.x,
+            dy: ctx.input_y - self.state.y,
+            dpressure: ctx.pressure - self.state.pressure,
+            dtime: dtime_left,
+            declination: ctx.tilt_declination - self.state.declination,
+            ascension: smallest_angular_difference(self.state.ascension, ctx.tilt_ascension),
+            declinationx: ctx.tilt_declinationx - self.state.declinationx,
+            declinationy: ctx.tilt_declinationy - self.state.declinationy,
+            barrel_rotation: smallest_angular_difference(
+                self.state.barrel_rotation,
+                ctx.barrel_rotation * 360.0,
+            ),
+        };
+        self.update_states(&catch_up, ctx.viewzoom, ctx.viewrotation);
+
+        // save the fraction of a dab that is already done
+        self.state.partial_dabs = dabs_moved + dabs_todo;
+
+        PaintDabsResult {
+            painted,
+            last_step_dpressure,
+        }
+    }
+
+    /// 构造一个 fractional StrokeStep — 两个 dabs loop 分支共用的算式，
+    /// 抽出消除 ~30 行复制粘贴。两个分支的差异在外层（`ddab` 怎么算 +
+    /// `dabs_moved` 是否清零），传进来的 `(frac, ddab)` 不同。
+    #[inline]
+    fn make_step(&self, ctx: &StrokeContext, frac: f32, ddab: f32, dtime_left: f32) -> StrokeStep {
+        StrokeStep {
+            ddab,
+            dx: frac * (ctx.input_x - self.state.x),
+            dy: frac * (ctx.input_y - self.state.y),
+            dpressure: frac * (ctx.pressure - self.state.pressure),
+            dtime: frac * dtime_left,
+            declination: frac * (ctx.tilt_declination - self.state.declination),
+            ascension: frac * smallest_angular_difference(self.state.ascension, ctx.tilt_ascension),
+            declinationx: frac * (ctx.tilt_declinationx - self.state.declinationx),
+            declinationy: frac * (ctx.tilt_declinationy - self.state.declinationy),
+            barrel_rotation: frac
+                * smallest_angular_difference(
+                    self.state.barrel_rotation,
+                    ctx.barrel_rotation * 360.0,
+                ),
+        }
+    }
+
     // =========================================================================
     // mypaint_brush_stroke_to — mypaint-brush.c:1300-1547
     // =========================================================================
@@ -992,101 +1123,22 @@ impl Brush {
         }
 
         // draw many dabs
-        let mut painted: Option<bool> = None;
-        let mut dtime_left = dtime as f32;
-
-        // 持久化 step_dpressure（stroke-split 检查需要最后一次的值，
-        // 对应 C 的 `step_dpressure` 在循环外声明）
-        let mut last_step_dpressure: f32 = 0.0;
-
-        let mut dabs_moved = self.state.partial_dabs;
-        let mut dabs_todo = self.count_dabs(input_x, input_y, dtime as f32);
-
-        while dabs_moved + dabs_todo >= 1.0 {
-            let step = if dabs_moved > 0.001 {
-                let ddab = 1.0 - dabs_moved;
-                dabs_moved = 0.0;
-                let frac = ddab / dabs_todo;
-                StrokeStep {
-                    ddab,
-                    dx: frac * (input_x - self.state.x),
-                    dy: frac * (input_y - self.state.y),
-                    dpressure: frac * (pressure - self.state.pressure),
-                    dtime: frac * dtime_left,
-                    declination: frac * (tilt_declination - self.state.declination),
-                    ascension: frac
-                        * smallest_angular_difference(self.state.ascension, tilt_ascension),
-                    declinationx: frac * (tilt_declinationx - self.state.declinationx),
-                    declinationy: frac * (tilt_declinationy - self.state.declinationy),
-                    barrel_rotation: frac
-                        * smallest_angular_difference(
-                            self.state.barrel_rotation,
-                            barrel_rotation * 360.0,
-                        ),
-                }
-            } else {
-                let frac = 1.0 / dabs_todo;
-                StrokeStep {
-                    ddab: 1.0,
-                    dx: frac * (input_x - self.state.x),
-                    dy: frac * (input_y - self.state.y),
-                    dpressure: frac * (pressure - self.state.pressure),
-                    dtime: frac * dtime_left,
-                    declination: frac * (tilt_declination - self.state.declination),
-                    ascension: frac
-                        * smallest_angular_difference(self.state.ascension, tilt_ascension),
-                    declinationx: frac * (tilt_declinationx - self.state.declinationx),
-                    declinationy: frac * (tilt_declinationy - self.state.declinationy),
-                    barrel_rotation: frac
-                        * smallest_angular_difference(
-                            self.state.barrel_rotation,
-                            barrel_rotation * 360.0,
-                        ),
-                }
-            };
-
-            last_step_dpressure = step.dpressure;
-            let step_dtime = step.dtime;
-            self.update_states(&step, viewzoom, viewrotation);
-
-            // Flip between 1 and -1
-            self.state.flip *= -1.0;
-
-            let painted_now = self.prepare_and_draw_dab(surface, linear);
-            if painted_now {
-                painted = Some(true);
-            } else if painted.is_none() {
-                painted = Some(false);
-            }
-
-            self.random_input = self.rng.next();
-            dtime_left -= step_dtime;
-            dabs_todo = self.count_dabs(input_x, input_y, dtime_left);
-        }
-
-        // Move brush to current time (no more dab will happen)
-        // 对应 mypaint-brush.c:1482，使用 dabs_todo (不含 dabs_moved)
-        {
-            let step = StrokeStep {
-                ddab: dabs_todo,
-                dx: input_x - self.state.x,
-                dy: input_y - self.state.y,
-                dpressure: pressure - self.state.pressure,
-                dtime: dtime_left,
-                declination: tilt_declination - self.state.declination,
-                ascension: smallest_angular_difference(self.state.ascension, tilt_ascension),
-                declinationx: tilt_declinationx - self.state.declinationx,
-                declinationy: tilt_declinationy - self.state.declinationy,
-                barrel_rotation: smallest_angular_difference(
-                    self.state.barrel_rotation,
-                    barrel_rotation * 360.0,
-                ),
-            };
-            self.update_states(&step, viewzoom, viewrotation);
-        }
-
-        // save the fraction of a dab that is already done
-        self.state.partial_dabs = dabs_moved + dabs_todo;
+        let ctx = StrokeContext {
+            input_x,
+            input_y,
+            pressure,
+            tilt_ascension,
+            tilt_declination,
+            tilt_declinationx,
+            tilt_declinationy,
+            viewzoom,
+            viewrotation,
+            barrel_rotation,
+        };
+        let PaintDabsResult {
+            painted,
+            last_step_dpressure,
+        } = self.paint_dabs_for_timestep(surface, &ctx, linear, dtime as f32);
 
         // stroke separation logic
         let painted = match painted {
