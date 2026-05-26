@@ -268,12 +268,11 @@ impl Brush {
     }
 
     pub fn from_defaults(&mut self) {
-        for s in 0..NUM_SETTINGS {
+        for (s, info) in SETTING_INFO.iter().enumerate() {
             for i in 0..NUM_INPUTS {
                 self.settings[s].mapping_mut().set_n(i, 0);
             }
-            let def = SETTING_INFO[s].def;
-            self.settings[s].set_base_value(def);
+            self.settings[s].set_base_value(info.def);
         }
         // Default: opaque_multiply mapped to pressure
         self.set_mapping_n(BrushSetting::OpaqueMultiply, 0, 2);

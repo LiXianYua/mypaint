@@ -40,8 +40,8 @@ fn parallel_matches_serial() {
             brush.stroke_to(
                 &mut **surf,
                 &mypaint::StrokeInputs {
-                    x: x,
-                    y: y,
+                    x,
+                    y,
                     pressure: 1.0,
                     dtime: 0.01,
                     ..Default::default()

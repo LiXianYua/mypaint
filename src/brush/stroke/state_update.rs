@@ -356,13 +356,7 @@ impl Brush {
 
         // calculate final radius
         let radius_log = self.settings_value[BrushSetting::RadiusLogarithmic as usize];
-        self.state.actual_radius = radius_log.exp();
-        if self.state.actual_radius < ACTUAL_RADIUS_MIN {
-            self.state.actual_radius = ACTUAL_RADIUS_MIN;
-        }
-        if self.state.actual_radius > ACTUAL_RADIUS_MAX {
-            self.state.actual_radius = ACTUAL_RADIUS_MAX;
-        }
+        self.state.actual_radius = radius_log.exp().clamp(ACTUAL_RADIUS_MIN, ACTUAL_RADIUS_MAX);
 
         // aspect ratio
         self.state.actual_elliptical_dab_ratio =

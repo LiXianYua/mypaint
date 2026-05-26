@@ -65,6 +65,7 @@ impl MaskParams {
 /// - `(sn, cs)`: angle 的 sin/cos（弧度）
 /// - `one_over_radius2`: 1/(radius²)
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn calculate_rr(
     xp: i32,
     yp: i32,
@@ -120,6 +121,7 @@ fn closest_point_to_line(lx: f32, ly: f32, px: f32, py: f32) -> (f32, f32) {
 
 /// Antialiased rr for small radii (radius < 3).
 /// 对应 mypaint-tiled-surface.c:277-354 calculate_rr_antialiased。
+#[allow(clippy::too_many_arguments)]
 #[inline]
 pub fn calculate_rr_antialiased(
     xp: i32,

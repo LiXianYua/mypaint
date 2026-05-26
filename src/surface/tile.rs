@@ -471,6 +471,7 @@ impl Surface for TiledSurface {
 ///
 /// - `paint < 0`: 走 legacy 路径 — 仅累加 additive sum_r/g/b (premultiplied)。
 /// - `paint >= 0`: 同时维护 avg_spectral 和 avg_rgb，最后由调用方合并。
+#[allow(clippy::too_many_arguments)]
 fn accumulate_tile_color_rle(
     mask: &[u16],
     tile: &[Premul15],

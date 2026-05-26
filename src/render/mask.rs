@@ -318,6 +318,7 @@ impl Default for MaskBuffer {
 
 /// 渲染 dab mask 到 RLE buffer。x/y 是 tile-local 坐标（dab 中心相对于 tile 左上角）。
 /// 对应 render_dab_mask in mypaint-tiled-surface.c:376-493。
+#[allow(clippy::too_many_arguments)]
 pub fn render_dab_mask(
     mask_buf: &mut MaskBuffer,
     x: f32,

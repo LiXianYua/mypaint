@@ -40,7 +40,7 @@ fn draw_on_tiled_surface_produces_nonzero_pixels() {
         brush.stroke_to(
             &mut *surface,
             &mypaint::StrokeInputs {
-                x: x,
+                x,
                 y: 60.0,
                 pressure: 1.0,
                 dtime: 0.01,

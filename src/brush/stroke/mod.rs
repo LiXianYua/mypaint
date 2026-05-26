@@ -28,20 +28,13 @@ const ACTUAL_RADIUS_MIN: f32 = 0.2;
 const ACTUAL_RADIUS_MAX: f32 = 1000.0;
 const GRID_SIZE: f32 = 256.0;
 
-/// 一步（一个 dab 时间窗，或时间窗尾的 catch-up）的 deltas。
-///
-/// 由 `stroke_to` 在 time-discretization 循环里组装，交给
-/// [`Brush::update_states`] 推进 `BrushState`。把以前的 10 个 `step_*`
-/// 位置参数收拢成一个 `Copy` 小结构（10×f32 = 40 字节），call site 用
-/// 字段名初始化、命名后零成本。
-///
-/// `viewzoom` / `viewrotation` 不在这里 — 它们是 `stroke_to` 这一整次
-/// 调用的常量，不是单步 delta。
-
 /// 一次 `stroke_to` 调用的 10 个 per-call 输入：bundled 给
 /// `paint_dabs_for_timestep` 和 `make_step` 这些内部 helper 用，避免
 /// 传 10 个独立 f32 参数。注意当前 brush state（`self.state.x` 等）仍
 /// 由 helper 直接通过 `&mut self` 访问，不进 context。
+///
+/// 与 [`StrokeStep`]（单步 delta）的区别：`StrokeContext` 在整个
+/// `stroke_to` 调用期间不变，`StrokeStep` 每个 dab 子步重算。
 #[derive(Clone, Copy, Debug)]
 struct StrokeContext {
     input_x: f32,

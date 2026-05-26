@@ -61,10 +61,10 @@ fn test_replay_events_smoke() {
         brush.stroke_to(
             &mut surface,
             &mypaint::StrokeInputs {
-                x: x,
-                y: y,
-                pressure: pressure,
-                dtime: dtime,
+                x,
+                y,
+                pressure,
+                dtime,
                 ..Default::default()
             },
         );
@@ -99,13 +99,13 @@ fn test_replay_events_smoke() {
         );
     }
     // 首 3 个 dab 锁定 RNG 初始顺序 + 第一段 stroke 的 motion smoothing。
-    approx_eq(surface.calls[0].x, 224.201721);
-    approx_eq(surface.calls[0].y, 207.184906);
-    approx_eq(surface.calls[1].x, 225.992981);
-    approx_eq(surface.calls[2].x, 214.074112);
+    approx_eq(surface.calls[0].x, 224.201_72);
+    approx_eq(surface.calls[0].y, 207.184_9);
+    approx_eq(surface.calls[1].x, 225.992_98);
+    approx_eq(surface.calls[2].x, 214.074_11);
     // 末 1 个 dab 锁定 30 秒 replay 后期累积状态。
     let last = &surface.calls[BASELINE_DAB_COUNT - 1];
-    approx_eq(last.x, 733.367920);
+    approx_eq(last.x, 733.367_9);
     approx_eq(last.y, 98.607506);
 
     // FNV-1a 64-bit rolling hash over per-dab non-positional params

@@ -3,6 +3,16 @@
 //!
 //! Low-quality settings (与 C 版默认一致):
 //!     QUALITY=19, TT=7, KK=10, LL=7
+//!
+//! 本文件保持与 Knuth 伪代码 + C 源 1:1 风格的 for-range 循环和手工
+//! array slice copy。Rust 的 idiomatic lint 倾向用 iterator / copy_from_slice
+//! 等，但改写后跟原算法描述/C 源对照度会下降，所以文件级关闭。
+//! `next()` 跟 `Iterator::next` 同名是 mypaint API（`rng_double_next`）的延续。
+#![allow(
+    clippy::needless_range_loop,
+    clippy::manual_memcpy,
+    clippy::should_implement_trait
+)]
 
 const KK: usize = 10;
 const LL: usize = 7;
