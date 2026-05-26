@@ -60,7 +60,8 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       # clippy 仅检查真正的 errors（不把所有 stylistic warning 当 error）
-      - run: cargo clippy --features ffi --no-deps -- -D clippy::correctness
+      # --all-targets 让 examples / tests / benches 也过 clippy
+      - run: cargo clippy --all-features --all-targets --no-deps -- -D clippy::correctness
 
   doc:
     name: Docs

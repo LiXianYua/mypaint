@@ -162,7 +162,7 @@ mod tests {
         // 至少有终止符
         assert!(slice.len() >= 2);
         // 全是 0
-        assert!(slice.iter().all(|&v| v == 0 || v != 0 && false));
+        assert!(slice.iter().all(|&v| v == 0));
     }
 
     #[test]
