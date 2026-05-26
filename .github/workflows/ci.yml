@@ -34,6 +34,12 @@ jobs:
       - name: Test (with ffi)
         run: cargo test --release --features ffi
 
+      - name: Test (with parallel)
+        run: cargo test --release --features parallel
+
+      - name: Test (all features)
+        run: cargo test --release --features ffi,parallel
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

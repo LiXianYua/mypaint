@@ -278,6 +278,15 @@ impl Brush {
         inputs[BrushInput::Custom as usize] = self.state.custom_input;
         inputs[BrushInput::BarrelRotation as usize] = mod_arith(self.state.barrel_rotation, 360.0);
 
+        // 对应 mypaint-brush.c:814-816 — 在 settings 计算前打印调试输出
+        if self.print_inputs {
+            print_brush_inputs(
+                &inputs,
+                self.state.viewrotation,
+                self.state.actual_elliptical_dab_angle,
+            );
+        }
+
         // Calculate all setting values from mappings
         // 对应 mypaint-brush.c:818-820 — 遍历全部 SETTINGS，不是 INPUTS！
         for i in 0..crate::NUM_SETTINGS {
@@ -1171,4 +1180,39 @@ fn apply_smudge_fn(
         *color_b = 0.0;
     }
     eraser_target_alpha
+}
+
+/// 调试用：在 stderr 上打印 brush 输入。对应 mypaint-brush.c:667-699 的 print_inputs。
+/// 仅当 brush.print_inputs == true 时调用。
+fn print_brush_inputs(inputs: &[f32; NUM_INPUTS], viewrotation: f32, actual_dab_angle: f32) {
+    eprint!(
+        "press={:6.3}, speed1={:7.4}\tspeed2={:7.4}",
+        inputs[BrushInput::Pressure as usize],
+        inputs[BrushInput::Speed1 as usize],
+        inputs[BrushInput::Speed2 as usize],
+    );
+    eprint!(
+        "\tstroke={:6.3}\tcustom={:6.3}",
+        inputs[BrushInput::Stroke as usize],
+        inputs[BrushInput::Custom as usize],
+    );
+    eprint!(
+        "\tviewzoom={:6.3}\tviewrotation={:6.3}",
+        inputs[BrushInput::Viewzoom as usize],
+        viewrotation,
+    );
+    eprint!(
+        "\tasc={:6.3}\tdir={:6.3}\tdec={:6.3}\tdabang={:6.3}",
+        inputs[BrushInput::TiltAscension as usize],
+        inputs[BrushInput::Direction as usize],
+        inputs[BrushInput::TiltDeclination as usize],
+        actual_dab_angle,
+    );
+    eprint!(
+        "\txtilt={:6.3}\tytilt={:6.3}attack={:6.3}",
+        inputs[BrushInput::TiltDeclinationx as usize],
+        inputs[BrushInput::TiltDeclinationy as usize],
+        inputs[BrushInput::AttackAngle as usize],
+    );
+    eprintln!();
 }

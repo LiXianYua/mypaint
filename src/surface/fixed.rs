@@ -16,6 +16,22 @@ pub struct FixedTileBackend {
     null_tile: Vec<u16>,
 }
 
+/// 单个 tile 的可变 buffer 指针 + 元数据。供并行渲染用，调用者要保证
+/// 多个 TileSlot 的 buffer ptr 不重叠。
+#[doc(hidden)]
+pub struct TileSlot {
+    pub tx: i32,
+    pub ty: i32,
+    /// raw ptr 指向 tile 的 u16 buffer（长度 TILE_BUFFER_LEN）。
+    /// 不同 TileSlot 的指针保证互不重叠。
+    pub buffer: *mut u16,
+}
+
+// SAFETY: 调用者保证 tx/ty 不重复 → 不同 TileSlot 指向 disjoint memory，
+// 每个 TileSlot 在并行作业期间被唯一一个线程持有。
+unsafe impl Send for TileSlot {}
+unsafe impl Sync for TileSlot {}
+
 impl FixedTileBackend {
     pub fn new(width: usize, height: usize) -> Self {
         let tiles_width = (width + TILE_SIZE - 1) / TILE_SIZE;
@@ -56,6 +72,27 @@ impl FixedTileBackend {
 
     fn reset_null_tile(&mut self) {
         self.null_tile.iter_mut().for_each(|v| *v = 0);
+    }
+
+    /// 为并行渲染收集多个不重叠 tile 的可变指针。
+    ///
+    /// # Safety
+    /// 调用者保证 `tiles` 中的 (tx, ty) 互不重复。返回的 TileSlot 之间
+    /// 内存不重叠，可并行使用。
+    #[doc(hidden)]
+    pub unsafe fn parallel_tile_slots(&mut self, tiles: &[(i32, i32)]) -> Vec<TileSlot> {
+        let base_ptr = self.tile_buffer.as_mut_ptr();
+        tiles
+            .iter()
+            .filter_map(|&(tx, ty)| {
+                let off = self.tile_offset(tx, ty)?;
+                Some(TileSlot {
+                    tx,
+                    ty,
+                    buffer: base_ptr.add(off),
+                })
+            })
+            .collect()
     }
 }
 
@@ -146,6 +183,77 @@ impl FixedTiledSurface {
     }
     pub fn height(&self) -> usize {
         self.height
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl FixedTiledSurface {
+    /// 并行版本的 end_atomic：使用 rayon 把 tile 渲染分发到多个线程。
+    /// 对应 C 上游 `threadsafe_tile_requests=TRUE` 时的 OpenMP 行为。
+    ///
+    /// 仅在启用 `parallel` feature 时可用。
+    pub fn end_atomic_parallel(&mut self) -> crate::util::rect::Rectangles {
+        use crate::surface::operations::TileIndex;
+        use crate::surface::tile::{process_op, TILE_BUFFER_LEN};
+        use rayon::prelude::*;
+
+        // 收集所有 dirty tiles
+        let dirty: Vec<TileIndex> = self.inner.operation_queue.dirty_tiles().collect();
+        if dirty.is_empty() {
+            // 没有 op，沿用串行逻辑（也只是清空 bbox 状态）
+            use crate::surface::Surface as _;
+            return self.inner.end_atomic();
+        }
+
+        // pop 所有 tile 的 ops（在主线程串行做，避免 HashMap 并发问题）
+        let tile_ops: Vec<(TileIndex, Vec<crate::surface::operations::OpDrawDab>)> = dirty
+            .iter()
+            .map(|&ti| {
+                let ops = self.inner.operation_queue.pop_all(ti);
+                (ti, ops)
+            })
+            .filter(|(_, ops)| !ops.is_empty())
+            .collect();
+
+        // 对应的 (tx, ty) 列表
+        let tile_coords: Vec<(i32, i32)> = tile_ops.iter().map(|(ti, _)| (ti.x, ti.y)).collect();
+
+        // 拿到 backend 的 FixedTileBackend（unsafe downcast 通过类型已知）
+        // SAFETY: FixedTiledSurface 总是用 FixedTileBackend 构造（new() 中）
+        let backend_ptr = self.inner.backend.as_mut() as *mut dyn crate::surface::tile::TileBackend
+            as *mut FixedTileBackend;
+        let slots: Vec<TileSlot> = unsafe {
+            // 各 (tx,ty) 唯一 → 各 buffer 指针不重叠
+            (*backend_ptr).parallel_tile_slots(&tile_coords)
+        };
+
+        // 把 (slot, ops) 配对并并行处理
+        tile_ops
+            .into_par_iter()
+            .zip(slots.into_par_iter())
+            .for_each(|((tile_idx, ops), slot)| {
+                // SAFETY: 每个 slot 的 buffer 指针对应一个唯一 tile，
+                // par_iter 保证当前线程独占该 slot
+                let buf: &mut [u16] =
+                    unsafe { std::slice::from_raw_parts_mut(slot.buffer, TILE_BUFFER_LEN) };
+                let mut mask_buf = crate::render::mask::MaskBuffer::new();
+                for op in &ops {
+                    process_op(buf, &mut mask_buf, tile_idx.x, tile_idx.y, op);
+                }
+            });
+
+        self.inner.operation_queue.clear_dirty_tiles();
+
+        // 收集 dirty bboxes 输出
+        let mut out = Vec::with_capacity(self.inner.num_bboxes_dirtied);
+        for i in 0..self.inner.num_bboxes_dirtied {
+            let b = self.inner.bboxes[i];
+            if b.width > 0 && b.height > 0 {
+                out.push(b);
+            }
+        }
+        self.inner.num_bboxes_dirtied = 0;
+        crate::util::rect::Rectangles { rects: out }
     }
 }
 

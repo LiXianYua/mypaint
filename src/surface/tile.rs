@@ -82,11 +82,11 @@ pub trait TileBackend {
 
 /// Tile-based surface（真正按 tile 渲染，对应 MyPaintTiledSurface）。
 pub struct TiledSurface {
-    backend: Box<dyn TileBackend>,
+    pub(crate) backend: Box<dyn TileBackend>,
     pub symmetry_data: SymmetryData,
-    operation_queue: OperationQueue,
-    bboxes: Vec<Rect>,
-    num_bboxes_dirtied: usize,
+    pub(crate) operation_queue: OperationQueue,
+    pub(crate) bboxes: Vec<Rect>,
+    pub(crate) num_bboxes_dirtied: usize,
 }
 
 impl TiledSurface {
@@ -164,7 +164,13 @@ impl TiledSurface {
 
 /// 对单个 tile 应用一个 dab op，先渲染 mask，再按 blend mode 逐通道混合。
 /// 对应 mypaint-tiled-surface.c:process_op。
-fn process_op(rgba: &mut [u16], mask_buf: &mut MaskBuffer, tx: i32, ty: i32, op: &OpDrawDab) {
+pub(crate) fn process_op(
+    rgba: &mut [u16],
+    mask_buf: &mut MaskBuffer,
+    tx: i32,
+    ty: i32,
+    op: &OpDrawDab,
+) {
     // mask 计算（tile-local 坐标）
     let local_x = op.x - (tx * TILE_SIZE as i32) as f32;
     let local_y = op.y - (ty * TILE_SIZE as i32) as f32;

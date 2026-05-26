@@ -213,6 +213,12 @@ impl Brush {
         self.stroke_total_painting_time
     }
 
+    /// Enable/disable printing brush inputs to stderr during stroke_to.
+    /// 对应 mypaint_brush_set_print_inputs，调试用。
+    pub fn set_print_inputs(&mut self, enabled: bool) {
+        self.print_inputs = enabled;
+    }
+
     pub fn set_base_value(&mut self, id: BrushSetting, value: f32) {
         self.settings[id as usize].set_base_value(value);
         self.settings_base_values_have_changed();

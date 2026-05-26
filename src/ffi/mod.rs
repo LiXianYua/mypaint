@@ -510,11 +510,11 @@ pub unsafe extern "C" fn mypaint_brush_get_total_stroke_painting_time(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn mypaint_brush_set_print_inputs(
-    _self_: *mut MyPaintBrush,
-    _enabled: c_int,
-) {
-    // No-op: diagnostic only. Original print_inputs prints to stderr; we skip.
+pub unsafe extern "C" fn mypaint_brush_set_print_inputs(self_: *mut MyPaintBrush, enabled: c_int) {
+    if self_.is_null() {
+        return;
+    }
+    handle(self_).set_print_inputs(enabled != 0);
 }
 
 /// Empty stub matching the C `mypaint_init()` symbol (which is empty in upstream too).
