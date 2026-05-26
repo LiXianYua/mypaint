@@ -26,7 +26,16 @@ fn main() {
     surface.begin_atomic();
     brush.stroke_to(
         &mut *surface,
-        20.0, 100.0, 0.0, 0.0, 0.0, 0.01, 1.0, 0.0, 0.0, false,
+        20.0,
+        100.0,
+        0.0,
+        0.0,
+        0.0,
+        0.01,
+        1.0,
+        0.0,
+        0.0,
+        false,
     );
     let steps = 200;
     let dt = 0.016;
@@ -37,7 +46,16 @@ fn main() {
         let pressure = 0.3 + (t * std::f32::consts::PI).sin() * 0.7;
         brush.stroke_to(
             &mut *surface,
-            x, y, pressure, 0.0, 0.0, dt as f64, 1.0, 0.0, 0.0, false,
+            x,
+            y,
+            pressure,
+            0.0,
+            0.0,
+            dt as f64,
+            1.0,
+            0.0,
+            0.0,
+            false,
         );
     }
     surface.end_atomic();

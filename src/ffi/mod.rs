@@ -1126,7 +1126,8 @@ pub unsafe extern "C" fn mypaint_tiled_surface_set_symmetry_state(
         4 => SymmetryType::Snowflake,
         _ => return,
     };
-    (*self_).inner.symmetry_data.set_pending(
+    let inner = &mut (*self_).inner;
+    inner.symmetry_data.set_pending(
         active != 0,
         center_x,
         center_y,

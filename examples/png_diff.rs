@@ -18,10 +18,7 @@ fn main() {
     let b = load_rgba(&args[2]);
 
     if a.0 != b.0 || a.1 != b.1 {
-        eprintln!(
-            "Dimension mismatch: {}x{} vs {}x{}",
-            a.0, a.1, b.0, b.1
-        );
+        eprintln!("Dimension mismatch: {}x{} vs {}x{}", a.0, a.1, b.0, b.1);
         std::process::exit(2);
     }
     let (w, h, ap) = (a.0, a.1, a.2);
@@ -65,7 +62,9 @@ fn main() {
     println!("Dimension: {w}x{h} = {n} pixels");
     println!(
         "Exact-match pixels:     {} / {} ({:.2}%)",
-        exact, n, 100.0 * exact as f64 / n as f64
+        exact,
+        n,
+        100.0 * exact as f64 / n as f64
     );
     println!("Max channel diff:        R={max_r}, G={max_g}, B={max_b}, A={max_a}");
     println!("Max pixel total diff:    {max_total} (sum of RGBA abs diffs)");
