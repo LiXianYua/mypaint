@@ -110,7 +110,50 @@ fn test_replay_events_smoke() {
     let last = &surface.calls[BASELINE_DAB_COUNT - 1];
     approx_eq(last.x, 733.367920);
     approx_eq(last.y, 98.607506);
+
+    // FNV-1a 64-bit rolling hash over per-dab non-positional params
+    // (opaque, hardness, softness, alpha_eraser, aspect_ratio, angle,
+    // lock_alpha, colorize, posterize, paint, radius). 每个值乘 10000
+    // 再 round-to-i32 后入 hash —— 跨平台稳定（f32::round 是 half-away-from-zero
+    // 的确定行为，1/10000 步进 << 任何这些值的合理变动）。
+    //
+    // 这个 hash 是 milestone 3 review 反馈：x/y 抽样能 catch 位置/计数漂移，
+    // 但 color/opacity/hardness 等"非位置"参数的静默 drift 抓不住。hash
+    // 用于 milestone 4+ 的 public API reshape 等可能间接改算法的 phase。
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut hash: u64 = FNV_OFFSET;
+    let extend = |h: &mut u64, v: f32| {
+        let scaled = (v * 10000.0).round() as i32 as u32;
+        for b in scaled.to_le_bytes() {
+            *h ^= b as u64;
+            *h = h.wrapping_mul(FNV_PRIME);
+        }
+    };
+    for d in &surface.calls {
+        extend(&mut hash, d.opaque);
+        extend(&mut hash, d.hardness);
+        extend(&mut hash, d.softness);
+        extend(&mut hash, d.alpha_eraser);
+        extend(&mut hash, d.aspect_ratio);
+        extend(&mut hash, d.angle);
+        extend(&mut hash, d.lock_alpha);
+        extend(&mut hash, d.colorize);
+        extend(&mut hash, d.posterize);
+        extend(&mut hash, d.paint);
+        extend(&mut hash, d.radius);
+    }
+    const BASELINE_DAB_PARAMS_HASH: u64 = BASELINE_DAB_PARAMS_HASH_VALUE;
+    assert_eq!(
+        hash, BASELINE_DAB_PARAMS_HASH,
+        "regression: dab params hash drifted (positional snapshot未抓住的 color/opacity/hardness/etc 漂移)"
+    );
 }
+
+// Hash 基线值：在 milestone 3 P5 + review followup 后捕获。
+// 后续 milestone 改算法时如果 hash 变化但变化合理（例如 RNG 重排），
+// 需要在 commit message 里说明并更新本常量。
+const BASELINE_DAB_PARAMS_HASH_VALUE: u64 = 13857306452861084430;
 
 #[test]
 fn test_replay_pressure_zero_does_not_paint() {

@@ -1,14 +1,19 @@
-//! stroke_to 核心算法。逐行翻译 mypaint-brush.c。
+//! Brush stroke 引擎：把 input event (x/y/pressure/tilt/dtime) 序列转成 dab。
 //!
-//! 对应函数:
-//! - directional_offsets (L586-664)
-//! - update_states_and_setting_values (L708-904)
-//! - fetch_smudge_bucket (L906-918)
-//! - update_smudge_color (L920-997)
-//! - apply_smudge (L999-1035)
-//! - prepare_and_draw_dab (L1042-1250)
-//! - count_dabs_to (L1253-1287)
-//! - mypaint_brush_stroke_to (L1300-1547)
+//! mod.rs 本身只保留 stroke entry point ([`Brush::stroke_to`]) + `exp_decay`
+//! helper + crate-private 共享类型（[`StrokeStep`] / [`StrokeContext`] /
+//! [`PaintDabsResult`] / [`Offsets`]）与常量。其余按职责拆到子模块：
+//!
+//! - [`dab`] — dab 生成与时间离散化循环。
+//!   对应 mypaint-brush.c 的 prepare_and_draw_dab (L1042-1250) +
+//!   count_dabs_to (L1253-1287)，加 Rust 侧新增的 paint_dabs_for_timestep
+//!   + make_step helper。
+//! - [`state_update`] — 每步 BrushState 推进 + setting 插值。
+//!   对应 mypaint-brush.c 的 update_states_and_setting_values
+//!   (L708-904) + directional_offsets (L586-664) + print_inputs。
+//! - [`smudge`] — smudge bucket 取/读写 + 颜色采样混合。
+//!   对应 mypaint-brush.c 的 fetch_smudge_bucket / update_smudge_color /
+//!   apply_smudge (L906-1035)。
 
 mod dab;
 mod smudge;
@@ -32,8 +37,11 @@ const GRID_SIZE: f32 = 256.0;
 ///
 /// `viewzoom` / `viewrotation` 不在这里 — 它们是 `stroke_to` 这一整次
 /// 调用的常量，不是单步 delta。
-/// 一次 `stroke_to` 调用期间的不变量上下文。bundled 给 `paint_dabs_for_timestep`
-/// 和 `make_step` 这些内部 helper 用，避免传 10 个独立 f32 参数。
+
+/// 一次 `stroke_to` 调用的 10 个 per-call 输入：bundled 给
+/// `paint_dabs_for_timestep` 和 `make_step` 这些内部 helper 用，避免
+/// 传 10 个独立 f32 参数。注意当前 brush state（`self.state.x` 等）仍
+/// 由 helper 直接通过 `&mut self` 访问，不进 context。
 #[derive(Clone, Copy, Debug)]
 struct StrokeContext {
     input_x: f32,
@@ -94,9 +102,6 @@ fn baseval(brush: &Brush, id: BrushSetting) -> f32 {
 fn setting(brush: &Brush, id: BrushSetting) -> f32 {
     brush.settings_value[id as usize]
 }
-
-// directional_offsets + update_states + print_brush_inputs 拆到 state_update.rs
-// smudge bucket fetch + update + apply 拆到 smudge.rs
 
 impl Brush {
     // =========================================================================
