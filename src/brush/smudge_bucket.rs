@@ -12,6 +12,11 @@
 /// Field layout matches the C upstream's
 /// `SMUDGE_R/G/B/A, PREV_COL_R/G/B/A, PREV_COL_RECENTNESS` order:
 /// `to_array()[0..4]` is `smudge`, `[4..8]` is `prev`, `[8]` is `recentness`.
+///
+/// **Stability**: 当前布局对应 mypaint C 上游约 1.6.x 时期的快照（9 个 f32 字段）。
+/// 不要把 [`Self::to_array`] 的输出作为 forward-stable wire format ——
+/// 如果上游某天加第 10 个字段，本 crate 的 `[f32; 9]` 桥接会同步演进，
+/// 你的存档可能需要做版本迁移。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SmudgeBucket {
     /// Current smudge color (RGBA, 0..=1).

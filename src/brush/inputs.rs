@@ -37,6 +37,11 @@ pub struct StrokeInputs {
     /// Y 方向倾斜，-1.0..=1.0。
     pub ytilt: f32,
     /// 距离上次 `stroke_to` 的时间（秒）。
+    ///
+    /// **注意**：`Default` 给 0.0，但 [`crate::Brush::stroke_to`] 内部把
+    /// `dtime <= 0.0` 静默改写为 `0.0001`（≈ sub-millisecond）。如果你
+    /// 用 `..Default::default()` 略掉 dtime，相当于"每次事件之间几乎瞬时"
+    /// —— 多数场景下不是你想要的。一般应显式指定（典型 16ms ≈ 0.016）。
     pub dtime: f64,
     /// 视图缩放因子。常用 1.0（100%）。
     pub viewzoom: f32,
