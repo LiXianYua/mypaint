@@ -1,9 +1,11 @@
 //! Brush engine core.
 //! Corresponds to MyPaintBrush in mypaint-brush.c.
 
+pub mod error;
 pub mod settings;
 pub mod state;
 
+pub use error::{BrushError, BrushParseError};
 pub use settings::BrushSettingData;
 pub use state::BrushState;
 
@@ -128,7 +130,7 @@ impl Brush {
     // 对应 mypaint-brush.c:447-532
 
     /// 设置某个 smudge bucket 的全部状态（RGBA + prevRGBA + recentness）。
-    /// 返回 true 成功，false 失败（索引越界）。
+    #[allow(clippy::too_many_arguments)]
     pub fn set_smudge_bucket_state(
         &mut self,
         bucket_index: usize,
@@ -141,12 +143,16 @@ impl Brush {
         prev_b: f32,
         prev_a: f32,
         prev_color_recentness: f32,
-    ) -> bool {
-        let Some(buckets) = self.smudge_buckets.as_mut() else {
-            return false;
-        };
+    ) -> Result<(), BrushError> {
+        let buckets = self
+            .smudge_buckets
+            .as_mut()
+            .ok_or(BrushError::SmudgeBucketsNotAllocated)?;
         if bucket_index >= buckets.len() {
-            return false;
+            return Err(BrushError::SmudgeBucketIndexOutOfRange {
+                index: bucket_index,
+                len: buckets.len(),
+            });
         }
         let b_slot = &mut buckets[bucket_index];
         b_slot[0] = r;
@@ -158,7 +164,7 @@ impl Brush {
         b_slot[6] = prev_b;
         b_slot[7] = prev_a;
         b_slot[8] = prev_color_recentness;
-        true
+        Ok(())
     }
 
     /// 读取某个 smudge bucket 的状态。返回 Some 表示成功。

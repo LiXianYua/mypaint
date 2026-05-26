@@ -46,7 +46,7 @@ fn test_replay_events_smoke() {
     // Load a brush
     let brush_json = fs::read_to_string("tests/brushes/bulk.myb").unwrap();
     let mut brush = Brush::new();
-    brush.from_string(&brush_json);
+    brush.from_string(&brush_json).expect("brush load");
 
     // Replay events
     let events = load_events("tests/events/painting30sec.dat");

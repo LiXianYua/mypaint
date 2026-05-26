@@ -75,8 +75,8 @@ fn main() {
             }
         };
         let mut brush = Brush::new();
-        if !brush.from_string(&json) {
-            eprintln!("跳过 {path}: brush 加载失败");
+        if let Err(e) = brush.from_string(&json) {
+            eprintln!("跳过 {path}: brush 加载失败: {e}");
             continue;
         }
         draw_curve(&mut brush, &mut surface, y, label);

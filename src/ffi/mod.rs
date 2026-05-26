@@ -314,10 +314,12 @@ pub unsafe extern "C" fn mypaint_brush_from_string(
         Ok(s) => s,
         Err(_) => return 0,
     };
-    if handle(self_).from_string(s) {
-        1
-    } else {
-        0
+    match handle(self_).from_string(s) {
+        Ok(()) => 1,
+        Err(e) => {
+            eprintln!("mypaint_brush_from_string: {e}");
+            0
+        }
     }
 }
 
@@ -549,7 +551,7 @@ pub unsafe extern "C" fn mypaint_brush_set_smudge_bucket_state(
     if self_.is_null() || bucket_index < 0 {
         return 0;
     }
-    let ok = handle(self_).set_smudge_bucket_state(
+    match handle(self_).set_smudge_bucket_state(
         bucket_index as usize,
         r,
         g,
@@ -560,11 +562,9 @@ pub unsafe extern "C" fn mypaint_brush_set_smudge_bucket_state(
         prev_b,
         prev_a,
         prev_color_recentness,
-    );
-    if ok {
-        1
-    } else {
-        0
+    ) {
+        Ok(()) => 1,
+        Err(_) => 0,
     }
 }
 

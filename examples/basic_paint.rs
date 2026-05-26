@@ -18,8 +18,8 @@ fn main() {
     // 2. 加载 charcoal 笔刷
     let brush_json = fs::read_to_string("tests/brushes/charcoal.myb").expect("read brush JSON");
     let mut brush = Brush::new();
-    if !brush.from_string(&brush_json) {
-        eprintln!("Failed to load brush");
+    if let Err(e) = brush.from_string(&brush_json) {
+        eprintln!("Failed to load brush: {e}");
         std::process::exit(1);
     }
 

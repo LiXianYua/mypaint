@@ -51,8 +51,8 @@ fn main() {
         process::exit(1);
     });
     let mut brush = Brush::new();
-    if !brush.from_string(&preset_json) {
-        eprintln!("Failed to load brush from {}", preset_path);
+    if let Err(e) = brush.from_string(&preset_json) {
+        eprintln!("Failed to load brush from {preset_path}: {e}");
         process::exit(1);
     }
 

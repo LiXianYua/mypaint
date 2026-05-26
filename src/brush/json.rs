@@ -1,55 +1,47 @@
 //! Brush JSON loading. Corresponds to mypaint-brush.c:1549-1681.
 
-use crate::brush::Brush;
+use crate::brush::{Brush, BrushParseError};
 use crate::BrushInput;
 use crate::BrushSetting;
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct BrushJson {
-    version: Option<i64>,
-    settings: Option<serde_json::Value>,
-}
 
 impl Brush {
     /// Load brush settings from a JSON string.
     /// Corresponds to `mypaint_brush_from_string`.
-    pub fn from_string(&mut self, string: &str) -> bool {
-        let json: serde_json::Value = match serde_json::from_str(string) {
-            Ok(v) => v,
-            Err(_) => {
-                return false;
-            }
-        };
+    ///
+    /// Unknown setting/input names are tolerated (a warning is printed to
+    /// stderr and the entry is skipped), matching upstream `libmypaint`'s
+    /// "best-effort" behavior. Returns an error only for hard failures:
+    /// malformed JSON, missing `version`/`settings`, wrong types, or
+    /// unsupported brush version.
+    pub fn from_string(&mut self, string: &str) -> Result<(), BrushParseError> {
+        let json: serde_json::Value = serde_json::from_str(string)?;
 
-        // Check version
-        if let Some(version) = json.get("version").and_then(|v| v.as_i64()) {
-            if version != 3 {
-                eprintln!("Error: Unsupported brush setting version: {version}");
-                return false;
-            }
-        } else {
-            eprintln!("Error: No 'version' field for brush");
-            return false;
+        let version = json
+            .get("version")
+            .and_then(|v| v.as_i64())
+            .ok_or(BrushParseError::MissingField("version"))?;
+        if version != 3 {
+            return Err(BrushParseError::UnsupportedVersion(version));
         }
 
-        // Parse settings
-        let Some(settings) = json.get("settings") else {
-            eprintln!("Error: No 'settings' field for brush");
-            return false;
+        let settings = json
+            .get("settings")
+            .ok_or(BrushParseError::MissingField("settings"))?;
+        let Some(obj) = settings.as_object() else {
+            return Err(BrushParseError::WrongFieldType {
+                field: "settings",
+                expected: "object",
+            });
         };
 
-        let mut updated_any = false;
-        if let Some(obj) = settings.as_object() {
-            for (setting_name, setting_obj) in obj {
-                if let Some(setting_id) = BrushSetting::from_cname(setting_name) {
-                    updated_any |= self.update_setting_from_json(setting_id, setting_obj);
-                } else {
-                    eprintln!("Warning: Unknown setting: {setting_name}");
-                }
+        for (setting_name, setting_obj) in obj {
+            if let Some(setting_id) = BrushSetting::from_cname(setting_name) {
+                self.update_setting_from_json(setting_id, setting_obj);
+            } else {
+                eprintln!("Warning: Unknown setting: {setting_name}");
             }
         }
-        updated_any
+        Ok(())
     }
 
     fn update_setting_from_json(
