@@ -76,7 +76,8 @@ fn main() {
     brush.new_stroke();
 
     for (i, s) in stroke.samples.iter().enumerate() {
-        // dtime==0.0 且不是第一个 sample：新的独立 stroke 段
+        // dtime==0.0 且不是第一个 sample：新的独立 stroke 段（如 cross.json 的第二条对角线）。
+        // sentinel 比较：dtime 字段是从 JSON 反序列化的，"dtime": 0 → IEEE 754 +0.0 精确比较安全。
         if i > 0 && s.dtime == 0.0 {
             brush.new_stroke();
         }
