@@ -151,7 +151,7 @@ mod tests {
         let mut rng = RngDouble::new(1000);
         for _ in 0..1000 {
             let v = rng.next();
-            assert!(v >= 0.0 && v < 1.0, "value out of range: {v}");
+            assert!((0.0..1.0).contains(&v), "value out of range: {v}");
         }
     }
 

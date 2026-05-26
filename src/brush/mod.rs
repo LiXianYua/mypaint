@@ -50,6 +50,12 @@ pub struct Brush {
     pub(crate) settings_value: [f32; NUM_SETTINGS],
 }
 
+impl Default for Brush {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Brush {
     pub fn new() -> Self {
         Self::new_with_buckets(0)

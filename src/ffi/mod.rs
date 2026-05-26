@@ -325,58 +325,63 @@ pub unsafe extern "C" fn mypaint_brush_from_string(
 // Surface FFI vtable (the C-side passes a MyPaintSurface struct with function pointers)
 // ============================================================================
 
+/// `draw_dab` 函数指针类型 — mypaint-surface.h 中 MyPaintSurfaceDrawDabFunction。
+pub type MyPaintSurfaceDrawDabFn = unsafe extern "C" fn(
+    surface: *mut MyPaintSurface,
+    x: f32,
+    y: f32,
+    radius: f32,
+    color_r: f32,
+    color_g: f32,
+    color_b: f32,
+    opaque: f32,
+    hardness: f32,
+    softness: f32,
+    alpha_eraser: f32,
+    aspect_ratio: f32,
+    angle: f32,
+    lock_alpha: f32,
+    colorize: f32,
+    posterize: f32,
+    posterize_num: f32,
+    paint: f32,
+) -> c_int;
+
+/// `get_color` 函数指针类型 — mypaint-surface.h 中 MyPaintSurfaceGetColorFunction。
+pub type MyPaintSurfaceGetColorFn = unsafe extern "C" fn(
+    surface: *mut MyPaintSurface,
+    x: f32,
+    y: f32,
+    radius: f32,
+    out_r: *mut f32,
+    out_g: *mut f32,
+    out_b: *mut f32,
+    out_a: *mut f32,
+    paint: f32,
+);
+
+pub type MyPaintSurfaceBeginAtomicFn = unsafe extern "C" fn(surface: *mut MyPaintSurface);
+pub type MyPaintSurfaceEndAtomicFn =
+    unsafe extern "C" fn(surface: *mut MyPaintSurface, roi: *mut MyPaintRectangles);
+pub type MyPaintSurfaceDestroyFn = unsafe extern "C" fn(surface: *mut MyPaintSurface);
+pub type MyPaintSurfaceSavePngFn = unsafe extern "C" fn(
+    surface: *mut MyPaintSurface,
+    path: *const c_char,
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+);
+
 /// C-compatible Surface vtable. Mirrors `struct MyPaintSurface` in mypaint-surface.h.
 #[repr(C)]
 pub struct MyPaintSurface {
-    pub draw_dab: Option<
-        unsafe extern "C" fn(
-            surface: *mut MyPaintSurface,
-            x: f32,
-            y: f32,
-            radius: f32,
-            color_r: f32,
-            color_g: f32,
-            color_b: f32,
-            opaque: f32,
-            hardness: f32,
-            softness: f32,
-            alpha_eraser: f32,
-            aspect_ratio: f32,
-            angle: f32,
-            lock_alpha: f32,
-            colorize: f32,
-            posterize: f32,
-            posterize_num: f32,
-            paint: f32,
-        ) -> c_int,
-    >,
-    pub get_color: Option<
-        unsafe extern "C" fn(
-            surface: *mut MyPaintSurface,
-            x: f32,
-            y: f32,
-            radius: f32,
-            out_r: *mut f32,
-            out_g: *mut f32,
-            out_b: *mut f32,
-            out_a: *mut f32,
-            paint: f32,
-        ),
-    >,
-    pub begin_atomic: Option<unsafe extern "C" fn(surface: *mut MyPaintSurface)>,
-    pub end_atomic:
-        Option<unsafe extern "C" fn(surface: *mut MyPaintSurface, roi: *mut MyPaintRectangles)>,
-    pub destroy: Option<unsafe extern "C" fn(surface: *mut MyPaintSurface)>,
-    pub save_png: Option<
-        unsafe extern "C" fn(
-            surface: *mut MyPaintSurface,
-            path: *const c_char,
-            x: c_int,
-            y: c_int,
-            width: c_int,
-            height: c_int,
-        ),
-    >,
+    pub draw_dab: Option<MyPaintSurfaceDrawDabFn>,
+    pub get_color: Option<MyPaintSurfaceGetColorFn>,
+    pub begin_atomic: Option<MyPaintSurfaceBeginAtomicFn>,
+    pub end_atomic: Option<MyPaintSurfaceEndAtomicFn>,
+    pub destroy: Option<MyPaintSurfaceDestroyFn>,
+    pub save_png: Option<MyPaintSurfaceSavePngFn>,
     pub refcount: c_int,
 }
 

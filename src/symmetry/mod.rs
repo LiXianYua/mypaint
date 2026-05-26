@@ -94,8 +94,8 @@ impl SymmetryData {
         }
 
         let angle_rad = self.state_current.angle.to_radians();
-        let cos_a = angle_rad.cos();
-        let sin_a = angle_rad.sin();
+        let _cos_a = angle_rad.cos();
+        let _sin_a = angle_rad.sin();
         let cx = self.state_current.center_x;
         let cy = self.state_current.center_y;
 

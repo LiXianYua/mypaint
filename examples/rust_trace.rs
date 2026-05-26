@@ -30,7 +30,7 @@ fn fmt_g9(v: f32) -> String {
     }
     let abs = v.abs();
     let exp = abs.log10().floor() as i32;
-    if exp >= -4 && exp < 9 {
+    if (-4..9).contains(&exp) {
         // 小数表示，9 位有效数字
         let prec = (9 - 1 - exp).max(0) as usize;
         let s = format!("{:.*}", prec, v);

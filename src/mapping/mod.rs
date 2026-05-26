@@ -117,6 +117,6 @@ impl Mapping {
     /// Calculate mapping with a single input value.
     /// Corresponds to `mypaint_mapping_calculate_single_input` in mypaint-mapping.c:191.
     pub fn calculate_single(&self, input: f32) -> f32 {
-        self.calculate(&std::slice::from_ref(&input))
+        self.calculate(std::slice::from_ref(&input))
     }
 }

@@ -48,7 +48,7 @@ impl OperationQueue {
 
     /// 推入 op 到指定 tile 的队列。
     pub fn add(&mut self, tile: TileIndex, op: OpDrawDab) {
-        self.queues.entry(tile).or_insert_with(Vec::new).push(op);
+        self.queues.entry(tile).or_default().push(op);
     }
 
     /// 取出该 tile 的所有 op（清空该队列）。

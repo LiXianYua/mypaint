@@ -56,7 +56,7 @@ fn main() {
             pressure,
             0.0,
             0.0,
-            dt as f64,
+            dt,
             1.0,
             0.0,
             0.0,

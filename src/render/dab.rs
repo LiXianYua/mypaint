@@ -139,7 +139,7 @@ pub fn calculate_rr_antialiased(
     let pixel_left = pixel_right - 1.0;
     let pixel_top = pixel_bottom - 1.0;
 
-    let (nearest_x, nearest_y, r_near, rr_near) =
+    let (nearest_x, nearest_y, _r_near, rr_near) =
         if pixel_left < 0.0 && pixel_right > 0.0 && pixel_top < 0.0 && pixel_bottom > 0.0 {
             (0.0, 0.0, 0.0, 0.0)
         } else {

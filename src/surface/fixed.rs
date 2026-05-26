@@ -55,8 +55,8 @@ impl FixedTileBackend {
     }
 
     fn new_with_fill(width: usize, height: usize, fill: u16) -> Self {
-        let tiles_width = (width + TILE_SIZE - 1) / TILE_SIZE;
-        let tiles_height = (height + TILE_SIZE - 1) / TILE_SIZE;
+        let tiles_width = width.div_ceil(TILE_SIZE);
+        let tiles_height = height.div_ceil(TILE_SIZE);
         let tile_buffer = vec![fill; tiles_width * tiles_height * TILE_BUFFER_LEN];
         let null_tile = vec![0u16; TILE_BUFFER_LEN];
         Self {

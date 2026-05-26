@@ -7,6 +7,12 @@ pub struct BrushSettingData {
     mapping: Mapping,
 }
 
+impl Default for BrushSettingData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BrushSettingData {
     pub fn new() -> Self {
         Self {

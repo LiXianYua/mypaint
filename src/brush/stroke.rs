@@ -229,7 +229,7 @@ impl Brush {
         let mut inputs = [0.0; NUM_INPUTS];
 
         // Helper macros converted to inline closures
-        let set_input = |inputs: &mut [f32; NUM_INPUTS], id: BrushInput, val: f32| {
+        let _set_input = |inputs: &mut [f32; NUM_INPUTS], id: BrushInput, val: f32| {
             inputs[id as usize] = val;
         };
 
@@ -827,7 +827,7 @@ impl Brush {
             self.skip -= dist;
             dtime = self.skipped_dtime as f64;
 
-            if self.skip > 0.001 && !(dtime > max_dtime as f64 || self.reset_requested) {
+            if self.skip > 0.001 && !(dtime > max_dtime || self.reset_requested) {
                 return false;
             }
             self.skip = 0.0;
@@ -865,7 +865,7 @@ impl Brush {
         let input_y = self.state.y + (effective_y - self.state.y) * fac;
 
         // reset or time jump
-        if dtime > (max_dtime as f64) || self.reset_requested {
+        if dtime > max_dtime || self.reset_requested {
             self.reset_requested = false;
             self.brush_reset();
             self.random_input = self.rng.next();
