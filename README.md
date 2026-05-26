@@ -1,12 +1,29 @@
 # libmypaint (Rust)
 
-[libmypaint](https://github.com/mypaint/libmypaint) 画笔引擎的 Rust 1:1 复刻。
+[libmypaint](https://github.com/mypaint/libmypaint) 画笔引擎的 idiomatic Rust 移植。
 
-逐行翻译自 C 源码（约 6364 行 → 4900+ 行 Rust），通过 dab 参数 trace 对照
-在 62k+ 笔触上验证与 C 上游行为等价：4/5 个测试笔刷的 dab 数量精确一致，
-所有结构化参数（aspect/angle/opaque/lock_alpha/colorize/posterize/paint/
-alpha_eraser/color）bit-exact 完全相同，剩余字段仅有亚像素浮点累积误差
-（<1e-3 像素）。
+- **FFI C ABI 与上游兼容** — `cargo build --release --features ffi` 输出
+  `libmypaint.so` drop-in 替换。
+- **算法行为对照 C 上游**：non-random brush (`charcoal` / `coarse_bulk_2` /
+  `c_demo`) **100% bit-exact**；含随机性 brush（impressionism / modelling）
+  70-92% 像素一致（差异源于跨编译器 IEEE-754 `exp`/`log` LSB 差 + RNG
+  错位放大，**非算法 regression** — 跨平台 / 跨 libm 之间普遍存在）。
+- **idiomatic Rust 设计**：错误用 `Result<T, BrushError>`、像素用 `Premul15`
+  / `Coverage15` / `RleSkip` newtype 阻止 OOR 值、`stroke_to` 用 `StrokeInputs`
+  struct + `Default`。
+- **73 单元测试 + replay baseline**（FNV-1a hash 锁住非随机 brush 渲染输出，
+  防止后续 refactor regression）。
+
+### 历史
+
+本 crate 起步于"逐行 1:1 翻译 C 源"——那个阶段终态归档在
+[`literal-c-port`](https://github.com/LiXianYua/mypaint/tree/literal-c-port)
+分支。`main` 分支经过 4 个里程碑重构后达到当前状态：
+
+1. **错误处理** — `from_string` / `set_smudge_bucket_state` 改 `Result`
+2. **颜色类型安全** — `Premul15` / `Coverage15` / `RleSkip` newtype + `RleEntry` 中心化 decode
+3. **拆 `stroke.rs`** — 单文件 1170 行 → 4 个子模块（mod / state_update / dab / smudge）
+4. **公开 API 重塑** — 11 位置参数 → `StrokeInputs` struct + `..Default::default()`
 
 ## Features
 
@@ -123,10 +140,10 @@ diff rust_trace.txt c_trace.txt
 |------|--------|--------|------|
 | `FixedTiledSurface` 初始填充 | `0xFFFF` (memset 255) | `0u16` (透明黑) | C 上游用了非法像素值（超过 SCALE=32768），blend 公式会溢出导致"空心"渲染。MyPaint 应用层不踩这个 bug 是因为载入时 layer 像素会 alpha-blend 覆盖整个 tile。|
 
-`main` 分支在早期阶段提供过 `FixedTiledSurface::new_c_compat()`
-用于 100% bit-exact 复刻 C 上游（含其 bug）；`refactor/idiomatic-rust`
-分支已脱离"代码对代码 1:1 复刻"目标，仅保留功能对应 + FFI ABI 兼容，
-该 API 已删除。
+[`literal-c-port`](https://github.com/LiXianYua/mypaint/tree/literal-c-port)
+分支保留了早期 1:1 复刻终态（含 `FixedTiledSurface::new_c_compat()`
+用于 bit-exact 验证 C 上游 bug）。`main` 已脱离"代码对代码 1:1 复刻"
+目标，仅保留功能对应 + FFI ABI 兼容，该 API 已删除。
 
 ## 致谢
 
